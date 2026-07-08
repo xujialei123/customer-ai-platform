@@ -50,6 +50,12 @@ export class KnowledgeStore {
     ]);
   }
 
+  async deleteCompiledSource(fileId: string): Promise<void> {
+    // 重复编译同一文件前清理旧卡片和 Wiki，避免管理页与检索结果成倍增长。
+    await this.pool.query('DELETE FROM rag_knowledge_cards WHERE source_id=$1', [fileId]);
+    await this.pool.query(`DELETE FROM rag_wiki_pages WHERE source_ids @> $1::jsonb`, [JSON.stringify([fileId])]);
+  }
+
   async saveCards(cards: KnowledgeCard[], embeddings: number[][]): Promise<void> {
     for (const [index, card] of cards.entries()) {
       const vector = `[${(embeddings[index] ?? []).join(',')}]`;
@@ -77,6 +83,41 @@ export class KnowledgeStore {
         AND ($3::text IS NULL OR category=$3 OR category='other')
       ORDER BY priority DESC, updated_at DESC LIMIT $4`, [filters.platform ?? null, filters.shopId ?? null, filters.category ?? null, filters.limit ?? 500]);
     return result.rows.map(mapCard);
+  }
+
+  async getCard(id: string): Promise<KnowledgeCard | null> {
+    const result = await this.pool.query('SELECT * FROM rag_knowledge_cards WHERE id=$1', [id]);
+    return result.rows[0] ? mapCard(result.rows[0]) : null;
+  }
+
+  async listWikiPages(kbId?: string) {
+    const result = await this.pool.query(`SELECT id,kb_id,title,summary,platform,shop_id,category,created_at,updated_at
+      FROM rag_wiki_pages WHERE ($1::text IS NULL OR kb_id=$1) ORDER BY updated_at DESC LIMIT 200`, [kbId ?? null]);
+    return result.rows;
+  }
+
+  async listEdges(limit = 300) {
+    const result = await this.pool.query('SELECT id,from_id,to_id,relation,created_at FROM rag_knowledge_graph_edges ORDER BY created_at DESC LIMIT $1', [limit]);
+    return result.rows;
+  }
+
+  async listGaps(limit = 200) {
+    const result = await this.pool.query('SELECT * FROM rag_knowledge_gaps ORDER BY count DESC,updated_at DESC LIMIT $1', [limit]);
+    return result.rows;
+  }
+
+  async updateCard(id: string, patch: Partial<KnowledgeCard>): Promise<KnowledgeCard | null> {
+    const current = await this.getCard(id);
+    if (!current)
+      return null;
+    const next = { ...current, ...patch, id: current.id, kbId: current.kbId, updatedAt: new Date().toISOString() };
+    await this.pool.query(`UPDATE rag_knowledge_cards SET title=$2,content=$3,answer=$4,question_variants=$5::jsonb,
+      keywords=$6::jsonb,tags=$7::jsonb,platform=$8,shop_id=$9,shop_name=$10,category=$11,
+      related_card_ids=$12::jsonb,priority=$13,enabled=$14,updated_at=$15 WHERE id=$1`, [id, next.title, next.content,
+      next.answer ?? null, JSON.stringify(next.questionVariants), JSON.stringify(next.keywords), JSON.stringify(next.tags),
+      next.platform ?? null, next.shopId ?? null, next.shopName ?? null, next.category, JSON.stringify(next.relatedCardIds),
+      next.priority, next.enabled, next.updatedAt]);
+    return this.getCard(id);
   }
 
   async vectorSearch(embedding: number[], filters: { platform?: string; shopId?: string; category?: string; limit: number }) {

@@ -2,7 +2,7 @@ import { KnowledgeStore } from '../brain/knowledge-store.js';
 import type { KnowledgeCard } from '../brain/types.js';
 import { createEmbeddingProvider } from '../providers/embedding.js';
 import { ragRetrievalConfig } from './config.js';
-import { keywordScore } from './keyword.js';
+import { extractKeywords, keywordScore } from './keyword.js';
 import type { HybridRetrieveInput, RetrievalCandidate } from './types.js';
 
 function metadataScore(card: KnowledgeCard, input: HybridRetrieveInput): number {
@@ -30,7 +30,8 @@ export class HybridRetriever {
       const vectorHits = await this.store.vectorSearch(embedding, {
         platform: input.platform,
         shopId: input.shopId,
-        category: input.category,
+        // 多意图问题可能同时需要套餐与退款卡片，分类只参与加权，不能在召回阶段硬排除。
+        category: undefined,
         limit: ragRetrievalConfig.vectorTopK
       });
       for (const hit of vectorHits) {
@@ -53,12 +54,15 @@ export class HybridRetriever {
     const keywordCards = await this.store.listCards({
       platform: input.platform,
       shopId: input.shopId,
-      category: input.category,
+      category: undefined,
       limit: 500
     });
+    const originalKeywords = extractKeywords(input.query);
     for (const card of keywordCards) {
       const score = keywordScore(input.keywords, [card.title, card.answer, card.content, ...card.questionVariants, ...card.keywords].filter(Boolean).join(' '));
-      if (score <= 0)
+      const titleMatched = originalKeywords.some((keyword) => card.title.includes(keyword));
+      const adjustedScore = titleMatched ? 1 : score;
+      if (adjustedScore <= 0)
         continue;
       const candidate = merged.get(card.id) ?? {
         card,
@@ -69,7 +73,7 @@ export class HybridRetriever {
         hybridScore: 0,
         score: 0
       };
-      candidate.keywordScore = Math.max(candidate.keywordScore, score);
+      candidate.keywordScore = Math.max(candidate.keywordScore, adjustedScore);
       merged.set(card.id, candidate);
     }
 
@@ -87,6 +91,11 @@ export class HybridRetriever {
         + candidate.metadataScore * ragRetrievalConfig.weights.metadata
         + candidate.graphScore * ragRetrievalConfig.weights.graph;
       candidate.score = Math.min(1, candidate.hybridScore);
+      // 用户原词直接命中卡片标题且门店/平台匹配时，词法证据足够强，不应被较长正文的向量分稀释。
+      if (candidate.keywordScore === 1 && candidate.metadataScore === 1)
+        candidate.score = Math.max(candidate.score, 0.8);
+      if (candidate.card.category === input.category && candidate.vectorScore >= 0.68 && candidate.keywordScore >= 0.25)
+        candidate.score = Math.max(candidate.score, 0.76);
     }
     return [...merged.values()].sort((left, right) => right.score - left.score).slice(0, ragRetrievalConfig.rerankTopK);
   }

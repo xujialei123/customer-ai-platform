@@ -73,13 +73,17 @@ async function readDrafts(client, apiBaseUrl) {
         if (!response.ok)
             continue;
         const result = await response.json();
-        const unsentDrafts = (result.drafts ?? []).filter((draft) => draft.status !== 'sent' && !client.sentDrafts.has(draft.id));
+        const unsentDrafts = (result.drafts ?? []).filter((draft) => ['pending', 'approved'].includes(draft.status)
+            && !client.sentDrafts.has(draft.id)
+            // 自动模式只接收该浏览器连接实际提交过的消息草稿，历史 backlog 不能重新灌进当前输入框。
+            && (!client.autoSendEnabled || client.expectedMessageIds.has(draft.messageId)));
         // 自动发送每轮最多处理当前会话的一条新草稿，避免历史积压或并发轮询造成连续发送。
         const draftsToPush = client.autoSendEnabled ? unsentDrafts.slice(-1) : unsentDrafts;
         for (const draft of draftsToPush) {
             if (draft.status === 'sent' || client.sentDrafts.has(draft.id))
                 continue;
             client.sentDrafts.add(draft.id);
+            client.expectedMessageIds.delete(draft.messageId);
             const draftCreatedAt = new Date(draft.createdAt).getTime();
             const autoSendCutoff = Math.max(client.autoSendEnabledAt, client.connectedAt);
             const cooldownPassed = Date.now() - client.lastAutoSendAt >= 8000;
@@ -152,6 +156,8 @@ async function handleMessage(client, apiBaseUrl, raw) {
     }
     if (!['inbound', 'outbound'].includes(message.type))
         return;
+    if (message.type === 'inbound' && message.payload?.id)
+        client.expectedMessageIds.add(message.payload.id);
     const endpoint = message.type === 'outbound' ? '/rpa/outbound' : '/rpa/inbound';
     const response = await fetch(new URL(endpoint, apiBaseUrl), {
         method: 'POST',
@@ -159,6 +165,8 @@ async function handleMessage(client, apiBaseUrl, raw) {
         body: JSON.stringify(message.payload)
     });
     const result = await response.json().catch(() => ({ ok: false }));
+    if (!response.ok && message.type === 'inbound' && message.payload?.id)
+        client.expectedMessageIds.delete(message.payload.id);
     sendFrame(client.socket, {
         type: response.ok ? `${message.type}_ack` : 'error',
         requestId: message.requestId,
@@ -207,7 +215,8 @@ export function registerRpaExtensionGateway(server, apiPort) {
             connectedAt: Date.now(),
             pollingDrafts: false,
             lastAutoSendAt: 0,
-            sentDrafts: new Set()
+            sentDrafts: new Set(),
+            expectedMessageIds: new Set()
         };
         clients.add(client);
         socket.on('data', (chunk) => parseFrames(client, chunk, (raw) => {

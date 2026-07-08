@@ -1,0 +1,8 @@
+export function wikiCompilerPrompt(documentName: string, text: string): string {
+  return `你是企业知识整理助手。请根据原始资料整理结构化 Wiki，不要简单复制原文。
+需要提炼标题、总结、关键规则、FAQ、用户可能问法、关键词和关联知识。
+只输出 JSON：{"title":"","summary":"","content":"","faq":[{"question":"","answer":""}],"keywords":[],"questionVariants":[],"relatedTopics":[],"category":"other"}
+文件名：${documentName}
+原始资料：
+${text}`;
+}

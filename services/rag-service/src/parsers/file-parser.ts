@@ -51,4 +51,31 @@ function parseCsv(content) {
     const header = splitCsvLine(lines[0] ?? '');
     return lines.slice(1).map((line, index) => {
         const values = splitCsvLine(line);
-        const rowText =
+        const rowText = header.map((key, colIndex) => `${key || `列${colIndex + 1}`}=${values[colIndex] ?? ''}`).join('，');
+        return {
+            content: `第${index + 2}行：${rowText}`,
+            page: 1,
+            metadata: { sourceType: 'csv', rowIndex: index + 2 }
+        };
+    });
+}
+function splitCsvLine(line) {
+    const result = [];
+    let current = '';
+    let quoted = false;
+    for (let index = 0; index < line.length; index += 1) {
+        const char = line[index];
+        if (char === '"') {
+            quoted = !quoted;
+            continue;
+        }
+        if (char === ',' && !quoted) {
+            result.push(current.trim());
+            current = '';
+            continue;
+        }
+        current += char;
+    }
+    result.push(current.trim());
+    return result;
+}

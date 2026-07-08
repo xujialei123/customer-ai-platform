@@ -63,6 +63,12 @@
     .source { margin-top: 9px; border: 1px solid #dbe7fb; border-radius: 6px; padding: 10px; background: #f8fbff; font-size: 12px; line-height: 1.5; }
     .status { min-height: 21px; margin-top: 10px; color: var(--green); font-size: 12px; font-weight: 600; }
     .test-form button { margin-top: 12px; width: 100%; }
+    .brain-grid { display: grid; grid-template-columns: minmax(300px, .8fr) minmax(0, 1.2fr); gap: 18px; }
+    .card-list { max-height: 420px; overflow: auto; border: 1px solid #eaecf0; border-radius: 6px; }
+    .card-item { width: 100%; border: 0; border-bottom: 1px solid #eaecf0; border-radius: 0; padding: 12px; background: #fff; color: var(--ink); text-align: left; }
+    .card-item:last-child { border-bottom: 0; }
+    .card-item.active { background: var(--blue-soft); box-shadow: inset 3px 0 0 var(--blue); }
+    .card-meta { margin-top: 5px; color: var(--muted); font-size: 11px; }
     @media (max-width: 960px) {
       main { grid-template-columns: 1fr; }
       aside { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -161,11 +167,39 @@
           </div>
         </div>
       </div>
+      <div class="panel">
+        <div class="panel-head section-title"><h2>LLM Wiki 与知识卡片</h2><span id="brain-stats" class="eyebrow">0 张卡片</span></div>
+        <div class="panel-body brain-grid">
+          <div>
+            <div class="row">
+              <button id="refresh-brain" class="secondary" type="button">刷新卡片</button>
+              <button id="new-card" class="secondary" type="button">新增卡片</button>
+            </div>
+            <div id="card-list" class="card-list" style="margin-top:12px"></div>
+          </div>
+          <div>
+            <div class="row">
+              <div><label for="card-title">标题</label><input id="card-title" /></div>
+              <div><label for="card-category">分类</label><select id="card-category"><option value="faq">FAQ</option><option value="price">价格</option><option value="refund">退款</option><option value="reservation">预约</option><option value="parking">停车</option><option value="address">地址</option><option value="business_hours">营业时间</option><option value="package">套餐</option><option value="service">服务</option><option value="other">其他</option></select></div>
+            </div>
+            <label for="card-answer">标准答案</label><textarea id="card-answer"></textarea>
+            <label for="card-variants">用户可能问法（每行一个）</label><textarea id="card-variants"></textarea>
+            <div class="row">
+              <div><label for="card-keywords">关键词（逗号分隔）</label><input id="card-keywords" /></div>
+              <div><label for="card-platform">平台</label><select id="card-platform"><option value="all">全部</option><option value="meituan">美团</option><option value="douyin">抖音</option><option value="wecom">企微</option></select></div>
+              <div><label for="card-shop">门店 ID</label><input id="card-shop" /></div>
+            </div>
+            <div class="row" style="margin-top:14px"><button id="save-card" type="button">保存并重新 Embedding</button><button id="load-wiki" class="secondary" type="button">查看 Wiki</button></div>
+            <div class="row" style="margin-top:10px"><button id="load-graph" class="secondary" type="button">查看知识关系</button><button id="load-gaps" class="secondary" type="button">查看知识缺口</button></div>
+            <div id="brain-status" class="status"></div>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
 
   <script>
-    const state = { selectedKbId: '' };
+    const state = { selectedKbId: '', selectedCardId: '' };
     const el = (id) => document.getElementById(id);
     const headers = () => ({ 'x-api-key': el('api-key').value.trim() || 'local-dev-key' });
     const jsonHeaders = () => ({ ...headers(), 'Content-Type': 'application/json; charset=utf-8' });
@@ -193,6 +227,7 @@
           state.selectedKbId = kb.id;
           loadKbs();
           loadFiles();
+          loadCards();
         });
         list.appendChild(item);
       }
@@ -200,6 +235,7 @@
         state.selectedKbId = body.knowledgeBases[0].id;
         await loadKbs();
         await loadFiles();
+        await loadCards();
       }
     }
 
@@ -221,18 +257,106 @@
       const body = await request(`/api/kb/${state.selectedKbId}/files`, { headers: headers() });
       for (const file of body.files) {
         const row = document.createElement('tr');
-        row.innerHTML = '<td></td><td></td><td></td><td></td><td><button class="danger" type="button">删除</button></td>';
+        row.innerHTML = '<td></td><td></td><td></td><td></td><td><button class="compile" type="button">编译</button> <button class="danger" type="button">删除</button></td>';
         row.children[0].textContent = file.fileName;
         row.children[1].textContent = file.parseStatus;
         row.children[2].textContent = file.chunkCount;
         row.children[3].textContent = file.errorMessage || '';
-        row.querySelector('button').addEventListener('click', async () => {
+        row.querySelector('.compile').addEventListener('click', async () => {
+          el('brain-status').textContent = `正在编译 ${file.fileName} 为 Wiki 和知识卡片`;
+          const result = await request(`/api/kb/${state.selectedKbId}/files/${file.id}/compile-brain`, {
+            // 文件级知识默认是跨平台通用资料；门店专属范围应在卡片审核时显式设置，避免误用测试表单值。
+            method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ platform: 'all' })
+          });
+          el('brain-status').textContent = `完成：${result.cardCount} 张卡片，${result.edgeCount} 条关系`;
+          await loadCards();
+        });
+        row.querySelector('.danger').addEventListener('click', async () => {
           await request(`/api/kb/${state.selectedKbId}/files/${file.id}`, { method: 'DELETE', headers: headers() });
           await loadFiles();
           await loadKbs();
         });
         tbody.appendChild(row);
       }
+    }
+
+    async function loadCards() {
+      const list = el('card-list');
+      list.innerHTML = '';
+      if (!state.selectedKbId) return;
+      const body = await request(`/api/brain/cards?limit=300`, { headers: headers() });
+      const cards = body.cards.filter((card) => card.kbId === state.selectedKbId);
+      el('brain-stats').textContent = `${cards.length} 张卡片`;
+      for (const card of cards) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'card-item' + (card.id === state.selectedCardId ? ' active' : '');
+        button.innerHTML = '<strong></strong><div class="card-meta"></div>';
+        button.querySelector('strong').textContent = card.title;
+        button.querySelector('.card-meta').textContent = `${card.category} · ${card.platform || 'all'} · 优先级 ${card.priority}`;
+        button.addEventListener('click', () => fillCard(card));
+        list.appendChild(button);
+      }
+    }
+
+    function fillCard(card = null) {
+      state.selectedCardId = card?.id || '';
+      el('card-title').value = card?.title || '';
+      el('card-answer').value = card?.answer || card?.content || '';
+      el('card-variants').value = (card?.questionVariants || []).join('\n');
+      el('card-keywords').value = (card?.keywords || []).join(',');
+      el('card-category').value = card?.category || 'faq';
+      el('card-platform').value = card?.platform || 'all';
+      el('card-shop').value = card?.shopId || '';
+      loadCards();
+    }
+
+    async function saveCard() {
+      if (!state.selectedKbId) throw new Error('请先选择知识库');
+      const payload = {
+        kbId: state.selectedKbId,
+        title: el('card-title').value.trim(),
+        content: el('card-answer').value.trim(),
+        answer: el('card-answer').value.trim(),
+        questionVariants: el('card-variants').value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
+        keywords: el('card-keywords').value.split(/[,，]/).map((item) => item.trim()).filter(Boolean),
+        category: el('card-category').value,
+        platform: el('card-platform').value,
+        shopId: el('card-shop').value.trim() || null,
+        enabled: true,
+        priority: 100
+      };
+      const path = state.selectedCardId ? `/api/brain/cards/${state.selectedCardId}` : '/api/brain/cards';
+      const body = await request(path, { method: state.selectedCardId ? 'PATCH' : 'POST', headers: jsonHeaders(), body: JSON.stringify(payload) });
+      state.selectedCardId = body.card.id;
+      el('brain-status').textContent = '知识卡片和向量已保存';
+      await loadCards();
+    }
+
+    async function loadGaps() {
+      const body = await request('/api/brain/gaps', { headers: headers() });
+      el('brain-status').textContent = body.gaps.length
+        ? body.gaps.slice(0, 8).map((gap) => `${gap.query}（${gap.count} 次）：${gap.reason}`).join('\n')
+        : '目前没有知识缺口';
+    }
+
+    async function loadWiki() {
+      const body = await request(`/api/brain/wiki?kbId=${encodeURIComponent(state.selectedKbId)}`, { headers: headers() });
+      el('brain-status').textContent = body.pages.length
+        ? body.pages.slice(0, 12).map((page) => `${page.title} · ${page.category || 'other'} · ${page.platform || 'all'}`).join('\n')
+        : '当前知识库尚未编译 Wiki';
+    }
+
+    async function loadGraph() {
+      const [graphBody, cardBody] = await Promise.all([
+        request('/api/brain/graph', { headers: headers() }),
+        request('/api/brain/cards?limit=500', { headers: headers() })
+      ]);
+      const names = new Map(cardBody.cards.map((card) => [card.id, card.title]));
+      const edges = graphBody.edges.filter((edge) => names.has(edge.from_id) && names.has(edge.to_id));
+      el('brain-status').textContent = edges.length
+        ? edges.slice(0, 20).map((edge) => `${names.get(edge.from_id)} → ${edge.relation} → ${names.get(edge.to_id)}`).join('\n')
+        : '当前知识库尚未生成知识关系';
     }
 
     async function uploadAndIngest() {
@@ -309,6 +433,12 @@
       ['upload-ingest', uploadAndIngest],
       ['search', searchKb],
       ['chat', chat]
+      ,['refresh-brain', loadCards]
+      ,['new-card', () => fillCard()]
+      ,['save-card', saveCard]
+      ,['load-wiki', loadWiki]
+      ,['load-graph', loadGraph]
+      ,['load-gaps', loadGaps]
     ]) {
       el(id).addEventListener('click', () => handler().catch((error) => {
         el('upload-status').textContent = error.message;

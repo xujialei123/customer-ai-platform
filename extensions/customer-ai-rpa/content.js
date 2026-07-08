@@ -226,6 +226,15 @@ function conversationIdOf(item) {
     || '';
 }
 
+function setProcessingStatus(text) {
+  // Mock 页面提供状态占位；真实平台没有该节点时静默跳过，不向经营宝 DOM 注入额外 UI。
+  for (const targetDocument of getAccessibleDocuments()) {
+    const status = queryOneDeep(targetDocument, '[data-rpa-processing-status]');
+    if (status)
+      status.textContent = text;
+  }
+}
+
 function scheduleUnreadConversation(settings) {
   // 调度器严格串行：当前草稿尚未回填时不切换，防止多个客户共用一个输入框造成串话。
   if (!settings.autoSwitchConversations || conversationTask)
@@ -245,13 +254,15 @@ function scheduleUnreadConversation(settings) {
       phase: 'switching',
       startedAt: Date.now()
     };
+    setProcessingStatus('正在切换未读会话');
     // 使用页面真实点击事件切换客户，保持与真实商家后台行为一致。
     unreadItem.click();
     schedulerTimer = setTimeout(() => {
       // 页面结构变化或网络卡顿时释放任务，后续扫描可重新发现仍未处理的红点。
-      if (conversationTask?.startedAt && Date.now() - conversationTask.startedAt >= 30000)
+      // OpenClaw + Embedding 在本机可能超过 30 秒，过早切换会让返回草稿失去原会话投递目标。
+      if (conversationTask?.startedAt && Date.now() - conversationTask.startedAt >= 120000)
         conversationTask = null;
-    }, 31000);
+    }, 121000);
     return;
   }
 }
@@ -298,7 +309,8 @@ async function scanMessages() {
       seenMessages.add(id);
       // 第一次进入某个客户会话时只建立历史基线；后续新出现的 messageId 才进入 AI 回复链路。
       // 自动切入一个从未打开过的客户时，只提交角标对应的最后 N 条未读，不能把全部历史记录送给 AI。
-      const isScheduledUnread = direction === 'inbound' && scheduledUnreadCount > 0 && index >= items.length - scheduledUnreadCount;
+      // 连续未读通常是客户拆成多句发送；只用最新一条触发回复，避免同一客户瞬间收到多份 AI 回答。
+      const isScheduledUnread = direction === 'inbound' && scheduledUnreadCount > 0 && index === items.length - 1;
       if (isInitialConversationScan && !isScheduledUnread)
         return;
       if (direction === 'inbound') {
@@ -309,6 +321,7 @@ async function scanMessages() {
           phase: 'waiting-draft',
           startedAt: Date.now()
         };
+        setProcessingStatus(`AI 正在处理：${session.customerName || conversationId}`);
       }
       void safeRuntimeMessage({
         type: direction,
@@ -349,12 +362,24 @@ async function applyDraft(draft, expectedSession) {
   const input = queryOneDeep(targetDocument, settings.replyInputSelector);
   if (!input)
     return;
+  const canAutoSend = settings.autoSend && draft.allowAutoSend && draft.riskLevel === 'low' && settings.sendButtonSelector;
+  if (settings.autoSwitchConversations && settings.autoSend && !canAutoSend) {
+    // 全自动队列遇到转人工草稿时不能占住输入框，也不能误发；草稿继续保存在服务端供后台人工处理。
+    if (conversationTask && conversationTask.expectedConversationId === expectedSession?.conversationId) {
+      clearTimeout(schedulerTimer);
+      conversationTask = null;
+      setProcessingStatus('已转人工，继续等待新消息');
+      setTimeout(scanMessages, 500);
+    }
+    return;
+  }
   input.focus();
   input.textContent = draft.content;
   input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: draft.content }));
   // 自动发送必须同时满足扩展开关和服务端安全环境变量；默认永远只回填供人工确认。
-  if (settings.autoSend && draft.allowAutoSend && draft.riskLevel === 'low' && settings.sendButtonSelector) {
+  if (canAutoSend) {
     queryOneDeep(input.ownerDocument, settings.sendButtonSelector)?.click();
+    setProcessingStatus(`已自动回复：${expectedSession?.customerName || expectedSession?.conversationId || ''}`);
   }
   // 当前客户已经拿到草稿后才释放串行锁；下一轮扫描才允许切换到另一个未读客户。
   if (conversationTask && conversationTask.expectedConversationId === expectedSession?.conversationId) {

@@ -2,6 +2,10 @@
 export class SafetyService {
     highRiskKeywords = [
         '退款',
+        '退券',
+        '退钱',
+        '能退',
+        '想退',
         '投诉',
         '差评',
         '赔偿',

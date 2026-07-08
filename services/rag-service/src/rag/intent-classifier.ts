@@ -15,15 +15,17 @@ const intentRules: Array<{ category: KnowledgeCategory; keywords: string[] }> = 
 const strictCategories = new Set<KnowledgeCategory>(['price', 'refund', 'reservation', 'business_hours', 'address', 'package', 'parking']);
 
 export function classifyIntent(query: string): IntentClassifyResult {
-  const scores = intentRules.map((rule) => ({
-    category: rule.category,
-    matches: rule.keywords.filter((keyword) => query.includes(keyword)).length
-  })).sort((left, right) => right.matches - left.matches);
-  const best = scores[0];
-  const category = best?.matches ? best.category : 'other';
+  // 严格意图按规则优先级命中，避免“预约取送”因 service 词更多而覆盖 reservation。
+  const matchedRule = intentRules.find((rule) => rule.keywords.some((keyword) => query.includes(keyword)));
+  const category = matchedRule?.category ?? 'other';
+  const matchCount = matchedRule?.keywords.filter((keyword) => query.includes(keyword)).length ?? 0;
   return {
     category,
-    confidence: best?.matches ? Math.min(1, 0.65 + best.matches * 0.15) : 0.35,
+    confidence: matchCount ? Math.min(1, 0.65 + matchCount * 0.15) : 0.35,
     needStrictAnswer: strictCategories.has(category)
   };
+}
+
+export function detectIntentCategories(query: string): KnowledgeCategory[] {
+  return intentRules.filter((rule) => rule.keywords.some((keyword) => query.includes(keyword))).map((rule) => rule.category);
 }

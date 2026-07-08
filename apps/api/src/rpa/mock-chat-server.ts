@@ -22,7 +22,9 @@ function html(platform: 'douyin' | 'meituan') {
     * { box-sizing: border-box; }
     body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f5f7; color: #111827; }
     header { height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: ${accent}; color: ${headerColor}; }
+    .header-actions { display: flex; align-items: center; gap: 18px; }
     header label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .rpa-state { min-width: 150px; font-size: 13px; text-align: right; }
     main { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: calc(100vh - 56px); }
     aside { overflow: auto; border-right: 1px solid #d8dde6; background: #fff; }
     .aside-title { padding: 14px 16px 8px; color: #667085; font-size: 13px; }
@@ -56,7 +58,7 @@ function html(platform: 'douyin' | 'meituan') {
 <body data-platform="${platform}">
   <header>
     <strong>${platformName} 多会话测试台</strong>
-    <label><input id="auto-incoming" type="checkbox" />持续模拟客户来消息</label>
+    <div class="header-actions"><span class="rpa-state" data-rpa-processing-status>等待新消息</span><label><input id="auto-incoming" type="checkbox" />持续模拟客户来消息</label></div>
   </header>
   <main>
     <aside>
@@ -81,7 +83,14 @@ function html(platform: 'douyin' | 'meituan') {
   <script>
     const platform = document.body.dataset.platform;
     const shopId = platform + '-mock-shop-001';
-    const samples = ['周末可以用吗？', '你们几点营业？', '可以上门取送吗？', '衣服多久能洗好？', '羽绒服多少钱？'];
+    const samples = [
+      '周末可以使用团购券吗？', '你们今天几点关门？', '附近停车方便吗？', '需要提前预约吗？',
+      '羽绒服短款多少钱？', '运动鞋清洗需要几天？', '可以上门取衣服吗？', '上门取送怎么收费？',
+      '普通衣服多久能洗好？', '节假日正常营业吗？', '门店具体地址在哪里？', '最晚几点可以送洗？',
+      '团购券可以叠加使用吗？', '没有预约可以直接到店吗？', '白色运动鞋可以精洗吗？', '可以开电子发票吗？',
+      '油渍时间久了还能处理吗？', '加急最快多久可以取？', '真丝衣服可以清洗吗？', '取衣服需要带什么凭证？',
+      '洗好的衣服可以保管多久？', '窗帘清洗怎么收费？', '羊毛大衣一般几天洗好？', '停车场是免费的吗？'
+    ];
     const conversations = [
       { id: platform + '-customer-001', name: '林女士', unread: 0, messages: [] },
       { id: platform + '-customer-002', name: '陈先生', unread: 0, messages: [] },
@@ -90,6 +99,8 @@ function html(platform: 'douyin' | 'meituan') {
     ];
     let activeId = conversations[0].id;
     let autoTimer;
+    let autoIncomingEnabled = false;
+    const recentSamples = [];
     const list = document.querySelector('#conversation-list');
     const messages = document.querySelector('#messages');
     const sessionRoot = document.querySelector('#session-root');
@@ -159,11 +170,31 @@ function html(platform: 'douyin' | 'meituan') {
     }
 
     function simulateIncoming() {
-      // 优先给非当前会话发消息，才能稳定验证插件的未读发现和自动切换能力。
-      const candidates = conversations.filter((item) => item.id !== activeId);
+      // 只给没有未读积压的非当前会话发消息，生成速度不能超过串行 AI 的处理能力。
+      const candidates = conversations.filter((item) => item.id !== activeId && item.unread === 0);
+      if (!candidates.length)
+        return;
       const conversation = candidates[Math.floor(Math.random() * candidates.length)];
-      const content = samples[Math.floor(Math.random() * samples.length)];
+      const available = samples.filter((content) => content !== conversation.lastSimulated && !recentSamples.includes(content));
+      const pool = available.length ? available : samples.filter((content) => content !== conversation.lastSimulated);
+      const content = pool[Math.floor(Math.random() * pool.length)];
+      conversation.lastSimulated = content;
+      recentSamples.push(content);
+      if (recentSamples.length > 10)
+        recentSamples.shift();
       addMessage(conversation, 'inbound', content);
+    }
+
+    function scheduleNextIncoming() {
+      clearTimeout(autoTimer);
+      if (!autoIncomingEnabled)
+        return;
+      // 30-70 秒随机空档更接近真人咨询，也给 Embedding + OpenClaw 留出完整处理时间。
+      const delay = 30000 + Math.floor(Math.random() * 40001);
+      autoTimer = setTimeout(() => {
+        simulateIncoming();
+        scheduleNextIncoming();
+      }, delay);
     }
 
     document.querySelector('#customer-composer').addEventListener('submit', (event) => {
@@ -184,9 +215,8 @@ function html(platform: 'douyin' | 'meituan') {
     });
 
     document.querySelector('#auto-incoming').addEventListener('change', (event) => {
-      clearInterval(autoTimer);
-      if (event.target.checked)
-        autoTimer = setInterval(simulateIncoming, 9000);
+      autoIncomingEnabled = event.target.checked;
+      scheduleNextIncoming();
     });
 
     conversations.forEach((conversation, index) => addMessage(conversation, 'outbound', index === 0 ? '您好，请问有什么可以帮您？' : '您好。'));

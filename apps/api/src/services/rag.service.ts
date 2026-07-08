@@ -30,6 +30,31 @@ export class RagService {
      */
     async search(input) {
         try {
+            const hybridResponse = await fetch(`${env.RAG_SERVICE_URL}/api/rag/retrieve`, {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json; charset=utf-8',
+                    'x-api-key': env.RAG_API_KEY
+                },
+                body: JSON.stringify({
+                    query: input.query,
+                    platform: input.platform,
+                    shopId: input.shopId
+                }),
+                signal: AbortSignal.timeout(20000)
+            });
+            if (hybridResponse.ok) {
+                const hybridBody = await hybridResponse.json();
+                if ((hybridBody.results ?? []).length > 0) {
+                    return hybridBody.results.map((item) => ({
+                        id: item.id,
+                        content: item.content,
+                        metadata: { ...(item.metadata ?? {}), title: item.title, retrieval: 'hybrid-card' },
+                        score: Number(item.score ?? 0)
+                    }));
+                }
+            }
+            // 尚未编译知识卡片的旧知识库继续走 chunk 向量检索，方便存量文件逐步迁移。
             const kbIds = await this.getKnowledgeBaseIds();
             if (kbIds.length === 0)
                 return [];

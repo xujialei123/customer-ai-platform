@@ -1,5 +1,5 @@
 import { extractKeywords } from './keyword.js';
-import { classifyIntent } from './intent-classifier.js';
+import { classifyIntent, detectIntentCategories } from './intent-classifier.js';
 import type { QueryRewriteResult } from './types.js';
 
 const templates: Record<string, string[]> = {
@@ -13,12 +13,24 @@ const templates: Record<string, string[]> = {
   service: ['服务范围和处理时效']
 };
 
+const intentKeywords: Record<string, string[]> = {
+  parking: ['停车', '停车场', '车位', '收费'],
+  refund: ['退款', '退券', '退款规则'],
+  reservation: ['预约', '提前预约', '到店'],
+  business_hours: ['营业时间', '开门', '关门'],
+  address: ['地址', '位置', '导航'],
+  price: ['价格', '多少钱', '收费'],
+  package: ['套餐', '团购券', '包含', '使用规则'],
+  service: ['服务', '时效', '上门取送']
+};
+
 export function rewriteQuery(query: string): QueryRewriteResult {
   const intent = classifyIntent(query);
-  const rewrites = templates[intent.category] ?? [];
+  const categories = detectIntentCategories(query);
+  const rewrites = [...new Set((categories.length ? categories : [intent.category]).flatMap((category) => templates[category] ?? []))];
   return {
     originalQuery: query,
     rewrittenQueries: [...new Set([query, ...rewrites])].slice(0, 5),
-    keywords: extractKeywords(`${query} ${rewrites.join(' ')}`).slice(0, 30)
+    keywords: [...new Set([...extractKeywords(query), ...categories.flatMap((category) => intentKeywords[category] ?? [])])].slice(0, 24)
   };
 }
