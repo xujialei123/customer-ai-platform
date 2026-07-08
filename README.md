@@ -1,5 +1,7 @@
 # Customer AI Platform Skeleton
 
+项目整体架构、知识库、消息回复、RPA、订单查询与排障流程请查看：[`docs/project-flow.html`](docs/project-flow.html)。该文件可直接用浏览器打开，并应按 `AGENTS.md` 的规则随项目流程变更同步更新。
+
 多平台 AI 客服中台项目骨架，用于统一接入企业微信客服、抖音来客、美团到店团购，并通过独立 `rag-service` 提供知识库检索和 RAG 回复能力。
 
 ## 架构说明
