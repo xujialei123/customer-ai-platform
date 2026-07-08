@@ -1,0 +1,20 @@
+{
+  "lowConfidenceThreshold": 0.65,
+  "hardRejectThreshold": 0.35,
+  "maxContinuousAiReplies": 5,
+  "sensitiveKeywords": [
+    "投诉",
+    "举报",
+    "差评",
+    "赔偿",
+    "起诉",
+    "律师",
+    "监管",
+    "315",
+    "退款失败",
+    "联系老板",
+    "退款",
+    "人工"
+  ],
+  "fallbackReply": "这个问题我需要帮您转人工确认一下，请稍等。"
+}

@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Shop {
+  id                String            @id
+  name              String
+  platformShopId    String?
+  createdAt         DateTime          @default(now())
+  platformAccounts  PlatformAccount[]
+  conversations     Conversation[]
+  knowledgeSources  KnowledgeSource[]
+  knowledgeChunks   KnowledgeChunk[]
+
+  @@map("shops")
+}
+
+model PlatformAccount {
+  id          String   @id
+  platform    String
+  shopId      String
+  accountName String?
+  config      Json     @default("{}")
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  shop        Shop     @relation(fields: [shopId], references: [id])
+
+  @@map("platform_accounts")
+}
+
+model Conversation {
+  id                     String       @id
+  platform               String
+  shopId                 String
+  platformConversationId String
+  customerId             String
+  customerName           String?
+  status                 String       @default("open")
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  shop                   Shop         @relation(fields: [shopId], references: [id])
+  messages               Message[]
+  replyDrafts            ReplyDraft[]
+
+  @@unique([platform, platformConversationId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id
+  conversationId String
+  platform       String
+  direction      String
+  messageType    String       @default("text")
+  content        String?
+  raw            Json         @default("{}")
+  aiGenerated    Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  replyDrafts    ReplyDraft[]
+
+  @@map("messages")
+}
+
+model KnowledgeSource {
+  id         String           @id
+  shopId     String
+  title      String
+  sourceType String
+  content    String?
+  fileUrl    String?
+  enabled    Boolean          @default(true)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  shop       Shop             @relation(fields: [shopId], references: [id])
+  chunks     KnowledgeChunk[]
+
+  @@map("knowledge_sources")
+}
+
+model KnowledgeChunk {
+  id        String          @id
+  sourceId  String
+  shopId    String
+  content   String
+  metadata  Json            @default("{}")
+  // Prisma 暂不直接支持 pgvector 类型，这里用 Unsupported 声明。
+  // 实际迁移时需要在 SQL 中启用 vector 扩展，并设置维度。
+  embedding Unsupported("vector(1536)")?
+  createdAt DateTime        @default(now())
+  source    KnowledgeSource @relation(fields: [sourceId], references: [id])
+  shop      Shop            @relation(fields: [shopId], references: [id])
+
+  @@map("knowledge_chunks")
+}
+
+model ReplyDraft {
+  id             String       @id
+  conversationId String
+  messageId      String
+  content        String
+  status         String       @default("pending")
+  riskLevel      String       @default("low")
+  reason         String?
+  ragContext     Json         @default("[]")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  message        Message      @relation(fields: [messageId], references: [id])
+
+  @@map("reply_drafts")
+}

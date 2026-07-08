@@ -1,0 +1,14 @@
+# 本地依赖和构建产物不进入版本管理，避免不同机器之间互相污染。
+node_modules/
+apps/*/dist/
+
+# 环境变量只保留示例文件，真实 token / cookie 禁止提交。
+.env
+*.local
+config/*.local.json
+
+# 本地运行日志和 RPA 登录态只保存在开发机器上。
+*.log
+.sessions/
+release/
+.portable-staging/

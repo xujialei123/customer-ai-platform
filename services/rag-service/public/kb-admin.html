@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>知识库管理</title>
+  <style>
+    :root { color-scheme: light; --ink: #172033; --muted: #667085; --line: #dfe3e8; --soft: #f6f7f9; --blue: #175cd3; --blue-soft: #eff6ff; --green: #067647; --danger: #b42318; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--ink); background: var(--soft); letter-spacing: 0; }
+    button, input, select, textarea { font: inherit; letter-spacing: 0; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    header { height: 64px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; border-bottom: 1px solid #26344a; background: #172033; color: #fff; }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; background: #fff; color: #172033; font-weight: 800; }
+    .brand-copy { min-width: 0; }
+    h1 { margin: 0; font-size: 17px; line-height: 1.2; }
+    .brand-copy p { margin: 3px 0 0; color: #bdc7d6; font-size: 12px; }
+    .service-pill { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: #d7e0ec; }
+    .service-pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #32d583; box-shadow: 0 0 0 3px rgba(50,213,131,.14); }
+    main { display: grid; grid-template-columns: minmax(260px, 300px) minmax(0, 1fr); min-height: calc(100vh - 64px); }
+    main > *, .panel, .panel-body, .grid > * { min-width: 0; }
+    aside { border-right: 1px solid var(--line); background: #fff; padding: 20px 16px; overflow: auto; }
+    .workspace { width: 100%; max-width: 1380px; margin: 0 auto; padding: 24px 28px 40px; }
+    .sidebar-title, .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    h2 { margin: 0; font-size: 15px; line-height: 1.35; }
+    .sidebar-title span, .eyebrow { color: var(--muted); font-size: 12px; }
+    label { display: block; margin: 12px 0 6px; color: #475467; font-size: 12px; font-weight: 600; }
+    input, select, textarea { width: 100%; border: 1px solid #cfd5dd; border-radius: 6px; outline: none; background: #fff; color: var(--ink); }
+    input, select { height: 40px; padding: 0 11px; }
+    textarea { min-height: 104px; padding: 11px; resize: vertical; line-height: 1.55; }
+    input:focus, select:focus, textarea:focus { border-color: #84adff; box-shadow: 0 0 0 3px rgba(23,92,211,.1); }
+    input[type="file"] { height: 44px; padding: 6px; background: #fafbfc; }
+    input[type="file"]::file-selector-button { height: 30px; margin-right: 10px; border: 0; border-radius: 5px; padding: 0 12px; background: #e9edf3; color: #344054; font-weight: 600; cursor: pointer; }
+    button { min-height: 38px; border: 1px solid var(--blue); border-radius: 6px; padding: 0 13px; background: var(--blue); color: #fff; font-weight: 600; }
+    button:hover { filter: brightness(.96); }
+    button.secondary { border-color: #cfd5dd; background: #fff; color: #344054; }
+    button.danger { min-height: 30px; border-color: #fecdca; background: #fff; color: var(--danger); font-size: 12px; }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .row > * { flex: 1; min-width: 0; }
+    .sidebar-actions { margin: 14px 0 20px; }
+    .stack { display: grid; gap: 18px; }
+    .panel { border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .panel-head { padding: 16px 18px; border-bottom: 1px solid #eaecf0; }
+    .panel-body { padding: 18px; }
+    .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+    .kb-list { display: grid; gap: 7px; margin-top: 12px; }
+    .kb-item { min-height: 62px; border: 1px solid transparent; border-radius: 6px; padding: 10px 11px; background: #f8fafc; color: var(--ink); text-align: left; }
+    .kb-item strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .kb-item .muted { display: block; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .kb-item.active { border-color: #84adff; background: var(--blue-soft); box-shadow: inset 3px 0 0 var(--blue); }
+    .muted { color: var(--muted); font-size: 12px; }
+    .upload-bar { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 12px; align-items: center; }
+    .table-wrap { width: 100%; max-width: 100%; margin-top: 14px; overflow-x: auto; border: 1px solid #eaecf0; border-radius: 6px; }
+    table { width: 100%; min-width: 620px; border-collapse: collapse; background: #fff; }
+    th, td { border-bottom: 1px solid #eaecf0; padding: 11px 12px; text-align: left; vertical-align: middle; font-size: 12px; }
+    tr:last-child td { border-bottom: 0; }
+    th { color: #475467; background: #f9fafb; font-weight: 600; }
+    th:nth-child(3), td:nth-child(3) { width: 88px; text-align: center; }
+    th:last-child, td:last-child { width: 78px; text-align: right; }
+    .result { min-height: 46px; margin-top: 14px; white-space: pre-wrap; line-height: 1.65; font-size: 13px; }
+    .source { margin-top: 9px; border: 1px solid #dbe7fb; border-radius: 6px; padding: 10px; background: #f8fbff; font-size: 12px; line-height: 1.5; }
+    .status { min-height: 21px; margin-top: 10px; color: var(--green); font-size: 12px; font-weight: 600; }
+    .test-form button { margin-top: 12px; width: 100%; }
+    @media (max-width: 960px) {
+      main { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      .kb-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      header { padding: 0 16px; }
+      .brand-copy p { display: none; }
+      .workspace { padding: 16px 12px 28px; }
+      .kb-list { grid-template-columns: 1fr; }
+      .upload-bar, .row { grid-template-columns: 1fr; display: grid; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-mark">KB</div>
+      <div class="brand-copy">
+        <h1>知识库管理</h1>
+        <p>Customer AI Platform</p>
+      </div>
+    </div>
+    <span id="service-state" class="service-pill">服务正常</span>
+  </header>
+  <main>
+    <aside>
+      <div class="sidebar-title"><h2>知识库</h2><span id="kb-count">0 个</span></div>
+      <label for="api-key">API Key</label>
+      <input id="api-key" value="local-dev-key" />
+
+      <div class="row sidebar-actions">
+        <button id="refresh" type="button">刷新</button>
+        <button id="create" class="secondary" type="button">新建</button>
+      </div>
+
+      <label for="kb-name">知识库名称</label>
+      <input id="kb-name" value="公司知识库" />
+      <label for="kb-desc">描述</label>
+      <input id="kb-desc" value="公司客服统一知识库" />
+
+      <div id="kb-list" class="kb-list"></div>
+    </aside>
+    <section class="workspace stack">
+      <div class="panel">
+        <div class="panel-head section-title"><h2>文件与切片</h2><span class="eyebrow">TXT · MD · CSV · PDF · DOCX · XLSX</span></div>
+        <div class="panel-body">
+          <div class="upload-bar">
+            <input id="file" type="file" multiple accept=".txt,.md,.csv,.pdf,.docx,.xlsx" />
+            <button id="upload-ingest" type="button">批量上传并解析</button>
+          </div>
+          <div id="upload-status" class="status"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>文件</th>
+                  <th>状态</th>
+                  <th>Chunks</th>
+                  <th>错误</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="files"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <div class="panel-head"><h2>检索测试</h2></div>
+          <div class="panel-body test-form">
+            <label for="search-query">问题</label>
+            <textarea id="search-query">周末能用吗？</textarea>
+            <button id="search" type="button">开始检索</button>
+            <div id="search-results"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>RAG 回复测试</h2></div>
+          <div class="panel-body test-form">
+            <div class="row">
+              <select id="platform" aria-label="平台">
+                <option value="douyin">抖音</option>
+                <option value="meituan">美团</option>
+                <option value="wecom">企微</option>
+              </select>
+              <input id="shop-id" aria-label="门店 ID" value="douyin_shop_001" />
+            </div>
+            <label for="chat-message">用户消息</label>
+            <textarea id="chat-message">周末能用吗？</textarea>
+            <button id="chat" type="button">生成建议回复</button>
+            <div id="chat-result" class="result"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const state = { selectedKbId: '' };
+    const el = (id) => document.getElementById(id);
+    const headers = () => ({ 'x-api-key': el('api-key').value.trim() || 'local-dev-key' });
+    const jsonHeaders = () => ({ ...headers(), 'Content-Type': 'application/json; charset=utf-8' });
+
+    async function request(path, options = {}) {
+      const response = await fetch(path, options);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || response.statusText);
+      return body;
+    }
+
+    async function loadKbs() {
+      const body = await request('/api/kb/list', { headers: headers() });
+      el('kb-count').textContent = `${body.knowledgeBases.length} 个`;
+      const list = el('kb-list');
+      list.innerHTML = '';
+      for (const kb of body.knowledgeBases) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'kb-item' + (kb.id === state.selectedKbId ? ' active' : '');
+        item.innerHTML = '<strong></strong><div class="muted"></div>';
+        item.querySelector('strong').textContent = kb.name;
+        item.querySelector('.muted').textContent = `${kb.id} · ${kb.fileCount} 个文件`;
+        item.addEventListener('click', () => {
+          state.selectedKbId = kb.id;
+          loadKbs();
+          loadFiles();
+        });
+        list.appendChild(item);
+      }
+      if (!state.selectedKbId && body.knowledgeBases[0]) {
+        state.selectedKbId = body.knowledgeBases[0].id;
+        await loadKbs();
+        await loadFiles();
+      }
+    }
+
+    async function createKb() {
+      const body = await request('/api/kb/create', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ name: el('kb-name').value.trim(), description: el('kb-desc').value.trim() })
+      });
+      state.selectedKbId = body.kbId;
+      await loadKbs();
+      await loadFiles();
+    }
+
+    async function loadFiles() {
+      const tbody = el('files');
+      tbody.innerHTML = '';
+      if (!state.selectedKbId) return;
+      const body = await request(`/api/kb/${state.selectedKbId}/files`, { headers: headers() });
+      for (const file of body.files) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td></td><td></td><td></td><td></td><td><button class="danger" type="button">删除</button></td>';
+        row.children[0].textContent = file.fileName;
+        row.children[1].textContent = file.parseStatus;
+        row.children[2].textContent = file.chunkCount;
+        row.children[3].textContent = file.errorMessage || '';
+        row.querySelector('button').addEventListener('click', async () => {
+          await request(`/api/kb/${state.selectedKbId}/files/${file.id}`, { method: 'DELETE', headers: headers() });
+          await loadFiles();
+          await loadKbs();
+        });
+        tbody.appendChild(row);
+      }
+    }
+
+    async function uploadAndIngest() {
+      if (!state.selectedKbId) await createKb();
+      const files = Array.from(el('file').files || []).slice(0, 10);
+      if (!files.length) throw new Error('请选择至少一个文件');
+      let completed = 0;
+      let totalChunks = 0;
+      for (const file of files) {
+        el('upload-status').textContent = `正在处理 ${completed + 1}/${files.length}：${file.name}`;
+        const form = new FormData();
+        form.append('file', file);
+        const body = await request(`/api/kb/${state.selectedKbId}/upload-and-ingest`, {
+          method: 'POST',
+          headers: headers(),
+          body: form
+        });
+        completed += 1;
+        totalChunks += Number(body.chunkCount || 0);
+      }
+      el('file').value = '';
+      el('upload-status').textContent = `完成：${completed} 个文件，共 ${totalChunks} 个 chunk`;
+      await loadFiles();
+      await loadKbs();
+    }
+
+    async function searchKb() {
+      if (!state.selectedKbId) throw new Error('请先选择知识库');
+      const body = await request('/api/rag/search', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          platform: el('platform').value,
+          shopId: el('shop-id').value.trim(),
+          kbIds: [state.selectedKbId],
+          query: el('search-query').value.trim(),
+          topK: 5
+        })
+      });
+      el('search-results').innerHTML = body.results.map((item) =>
+        `<div class="source"><strong>${item.fileName}</strong> score=${Number(item.score).toFixed(2)}<div>${escapeHtml(item.content.slice(0, 320))}</div></div>`
+      ).join('') || '<p class="muted">没有命中</p>';
+    }
+
+    async function chat() {
+      const body = await request('/api/rag/chat', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          platform: el('platform').value,
+          shopId: el('shop-id').value.trim(),
+          sessionId: 'kb_admin_debug',
+          externalUserId: 'kb_admin_debug',
+          userMessage: el('chat-message').value.trim(),
+          history: []
+        })
+      });
+      el('chat-result').textContent = [
+        `回复：${body.answer}`,
+        `置信度：${body.confidence}`,
+        `是否转人工：${body.needHuman}`,
+        body.reason ? `原因：${body.reason}` : '',
+        `来源：${(body.sources || []).map((source) => `${source.fileName} ${Number(source.score || 0).toFixed(2)}`).join('；')}`
+      ].filter(Boolean).join('\n');
+    }
+
+    function escapeHtml(text) {
+      return text.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+    }
+
+    for (const [id, handler] of [
+      ['refresh', loadKbs],
+      ['create', createKb],
+      ['upload-ingest', uploadAndIngest],
+      ['search', searchKb],
+      ['chat', chat]
+    ]) {
+      el(id).addEventListener('click', () => handler().catch((error) => {
+        el('upload-status').textContent = error.message;
+        console.error(error);
+      }));
+    }
+
+    loadKbs().catch((error) => {
+      el('service-state').textContent = error.message;
+    });
+  </script>
+</body>
+</html>

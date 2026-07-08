@@ -1,0 +1,8 @@
+{
+  "topK": 5,
+  "scoreThreshold": 0.72,
+  "maxContextChars": 6000,
+  "historyTurns": 6,
+  "useRerank": false,
+  "noAnswerText": "这个问题我需要帮您转人工确认一下，请稍等。"
+}

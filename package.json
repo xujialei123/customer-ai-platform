@@ -1,0 +1,22 @@
+{
+  "name": "customer-ai-platform",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @customer-ai/api dev:all",
+    "dev:api": "pnpm --filter @customer-ai/api dev",
+    "dev:rag": "pnpm --filter @customer-ai/rag-service dev",
+    "build:packages": "pnpm --filter @customer-ai/shared build && pnpm --filter @customer-ai/rpa-sdk build",
+    "build": "pnpm build:packages && pnpm --filter @customer-ai/api build",
+    "build:rag": "pnpm --filter @customer-ai/shared build && pnpm --filter @customer-ai/rag-service build",
+    "build:all": "pnpm build:packages && pnpm --filter @customer-ai/api build && pnpm --filter @customer-ai/rag-service build",
+    "package:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-portable.ps1",
+    "start": "pnpm --filter @customer-ai/api start",
+    "start:rag": "pnpm --filter @customer-ai/rag-service start",
+    "prisma:migrate": "pnpm --filter @customer-ai/api prisma:migrate",
+    "prisma:studio": "pnpm --filter @customer-ai/api prisma:studio"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

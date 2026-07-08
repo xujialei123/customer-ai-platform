@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "客服中台 RPA 助手",
+  "version": "0.2.0",
+  "description": "在正常 Chrome 登录会话中桥接美团经营宝消息与本地客服中台。",
+  "permissions": ["storage", "tabs", "scripting", "webNavigation", "alarms"],
+  "host_permissions": [
+    "http://127.0.0.1:3001/*",
+    "http://127.0.0.1:3100/*",
+    "http://localhost:3100/*",
+    "https://g.dianping.com/*",
+    "https://ecom.meituan.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1:3100/*", "http://localhost:3100/*", "https://g.dianping.com/*", "https://ecom.meituan.com/*"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "match_origin_as_fallback": true,
+      "match_about_blank": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "客服中台 RPA 助手",
+    "default_popup": "popup.html"
+  }
+}

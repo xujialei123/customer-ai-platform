@@ -1,0 +1,7 @@
+{
+  "routes": [
+    { "platform": "douyin", "shopId": "douyin_shop_001", "kbIds": ["kb_common", "kb_douyin", "kb_after_sales"] },
+    { "platform": "meituan", "shopId": "meituan_shop_001", "kbIds": ["kb_common", "kb_meituan", "kb_after_sales"] },
+    { "platform": "wecom", "shopId": "default", "kbIds": ["kb_common", "kb_product", "kb_wecom"] }
+  ]
+}

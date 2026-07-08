@@ -1,0 +1,10 @@
+{
+  "platform": "meituan",
+  "id": "msg-demo-001",
+  "shopId": "shop-demo",
+  "conversationId": "conv-demo-001",
+  "customerId": "customer-demo-001",
+  "customerName": "测试客户",
+  "messageType": "text",
+  "content": "这个双人餐周末能用吗？"
+}

@@ -1,0 +1,28 @@
+{
+  "douyin": {
+    "url": "https://life.douyin.com/",
+    "defaultShopId": "default-shop",
+    "defaultConversationId": "douyin-demo-conv",
+    "defaultCustomerId": "douyin-demo-customer",
+    "selectors": {
+      "messageItem": "[data-rpa-message-item]",
+      "messageText": "[data-rpa-message-text]",
+      "messageIdAttribute": "data-message-id",
+      "customerNameAttribute": "data-customer-name",
+      "createdAtAttribute": "data-created-at"
+    }
+  },
+  "meituan": {
+    "url": "https://g.dianping.com/dzim-main-pc/index.html#/",
+    "defaultShopId": "default-shop",
+    "defaultConversationId": "meituan-demo-conv",
+    "defaultCustomerId": "meituan-demo-customer",
+    "selectors": {
+      "messageItem": "[data-rpa-message-item]",
+      "messageText": "[data-rpa-message-text]",
+      "messageIdAttribute": "data-message-id",
+      "customerNameAttribute": "data-customer-name",
+      "createdAtAttribute": "data-created-at"
+    }
+  }
+}

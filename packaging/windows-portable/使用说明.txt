@@ -1,0 +1,20 @@
+客服 AI Windows 一体化便携包
+
+外部依赖：Windows 10/11 64 位、Google Chrome、Docker Desktop。
+
+首次使用：
+1. 安装并启动 Docker Desktop。
+2. 双击 Start-Customer-AI.bat。
+3. 在 OpenClaw 配置页填写客户自己的模型 API Key。
+4. 在经营宝专用 Chrome 窗口人工登录一次。
+5. 打开知识库页面上传门店资料。
+
+日常使用：
+- 启动：Start-Customer-AI.bat
+- 停止：Stop-Customer-AI.bat
+- 检查：Doctor-Customer-AI.bat
+
+安全规则：
+- 默认关闭真实自动发送，先在草稿模式验证。
+- 不要删除 data 目录，否则经营宝登录态会丢失。
+- 不要把客户使用后的整个目录再次转发，data 中可能包含业务数据。

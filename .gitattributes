@@ -1,0 +1,11 @@
+# 统一换行，避免 Windows / macOS / Linux 协作时出现混乱
+* text=auto eol=lf
+
+# Markdown 和源码统一按 UTF-8 文本处理
+*.md text working-tree-encoding=UTF-8
+*.ts text working-tree-encoding=UTF-8
+*.tsx text working-tree-encoding=UTF-8
+*.json text working-tree-encoding=UTF-8
+*.yml text working-tree-encoding=UTF-8
+*.yaml text working-tree-encoding=UTF-8
+*.env.example text working-tree-encoding=UTF-8

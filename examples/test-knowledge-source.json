@@ -1,0 +1,12 @@
+{
+  "shopId": "shop-demo",
+  "title": "双人烤肉套餐规则",
+  "sourceType": "manual",
+  "content": "双人烤肉套餐周一至周日可用，法定节假日不可用。需要提前 2 小时预约。套餐适合 2 人使用，不含包间费。儿童 1 米以下免费，1 米以上按成人收费。",
+  "metadata": {
+    "category": "套餐规则",
+    "productName": "双人烤肉套餐",
+    "platform": "all",
+    "priority": 10
+  }
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>客服中台 RPA 助手</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header><strong>客服中台 RPA 助手</strong><span id="status">检查中</span></header>
+  <main>
+    <label>门店 ID<input id="shopId" /></label>
+    <label>消息容器选择器<input id="messageItemSelector" /></label>
+    <label>消息文本选择器<input id="messageTextSelector" /></label>
+    <label>回复输入框选择器<input id="replyInputSelector" /></label>
+    <label>发送按钮选择器<input id="sendButtonSelector" placeholder="留空则不自动发送" /></label>
+    <label class="toggle"><input id="enabled" type="checkbox" />启用页面监听</label>
+    <label class="toggle"><input id="autoSwitchConversations" type="checkbox" />自动处理未读会话</label>
+    <label class="toggle"><input id="autoSend" type="checkbox" />允许自动点击发送</label>
+  </main>
+  <div id="ai-result" role="status"></div>
+  <footer><button id="auto-config">AI 自动识别</button><button id="save" class="secondary">保存配置</button><button id="rescan" class="secondary">重新检测</button></footer>
+  <script src="popup.js"></script>
+</body>
+</html>

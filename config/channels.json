@@ -1,0 +1,35 @@
+{
+  "douyin": {
+    "enabled": true,
+    "platform": "douyin",
+    "shopId": "douyin_shop_001",
+    "kbIds": ["kb_common", "kb_douyin", "kb_after_sales"],
+    "autoReply": false,
+    "dryRun": true,
+    "replyDelayMs": 800,
+    "maxReplyChars": 500,
+    "unknownAnswerMode": "transfer_human"
+  },
+  "meituan": {
+    "enabled": true,
+    "platform": "meituan",
+    "shopId": "meituan_shop_001",
+    "kbIds": ["kb_common", "kb_meituan", "kb_after_sales"],
+    "autoReply": false,
+    "dryRun": true,
+    "replyDelayMs": 1200,
+    "maxReplyChars": 500,
+    "unknownAnswerMode": "transfer_human"
+  },
+  "wecom": {
+    "enabled": true,
+    "platform": "wecom",
+    "shopId": "default",
+    "kbIds": ["kb_common", "kb_product", "kb_wecom"],
+    "autoReply": false,
+    "dryRun": true,
+    "replyDelayMs": 500,
+    "maxReplyChars": 800,
+    "unknownAnswerMode": "transfer_human"
+  }
+}
