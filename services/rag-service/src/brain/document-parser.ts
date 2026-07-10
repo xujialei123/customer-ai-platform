@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/brain/document-parser.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 将原始文件解析为统一 ParsedDocument 结构。
+ * @see 联动关注：parsers/file-parser.ts。
+ */
 import { nanoid } from 'nanoid';
 import { getFileType, parseKnowledgeFile } from '../parsers/file-parser.js';
 import type { ParsedDocument } from './types.js';

@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/send.service.ts
+ * @module API Service 与 Worker
+ * @description 选择平台发送出口并检查全局 AUTO_REPLY 开关。
+ * @see 联动关注：企微 Client、RPA 自动发送开关。
+ */
 import { env } from '../config/env.js';
 import { getAdapter } from '../adapters/index.js';
 export class SendService {

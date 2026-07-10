@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file README.md
+  @module 根目录与配置
+  @description 项目入口、启动、接口地址和交付说明。
+  @see 联动关注：端口、启动与交付变化时同步。
+-->
 # Customer AI Platform Skeleton
 
 项目整体架构、知识库、消息回复、RPA、订单查询与排障流程请查看：[`docs/project-flow.html`](docs/project-flow.html)。该文件可直接用浏览器打开，并应按 `AGENTS.md` 的规则随项目流程变更同步更新。
@@ -343,7 +349,7 @@ curl http://127.0.0.1:8787/api/debug/logs/retrieval
 
 ## Windows 一体化便携包
 
-便携包包含生产构建、生产依赖、便携 Node、干净的 OpenClaw 程序及启停/诊断脚本。不会复制当前项目 `.env`、OpenClaw `data`、经营宝 Cookie、聊天记录或日志。
+便携包包含生产构建、生产依赖、便携 Node、干净的 OpenClaw 程序、Chrome RPA 扩展、项目流程文档及启停/诊断脚本。不会复制当前项目 `.env`、OpenClaw `data`、经营宝 Cookie、聊天记录或日志。
 
 生成目录包：
 
@@ -363,7 +369,15 @@ release\Customer-AI-Portable-YYYYMMDD-HHmmss
 Start-Customer-AI.bat
 ```
 
-首次使用需要客户在 OpenClaw 配置页填写自己的模型 API Key，并在经营宝专用 Chrome 中人工登录。停止服务使用 `Stop-Customer-AI.bat`，运行状态检查使用 `Doctor-Customer-AI.bat`。数据库卷、知识库文件和经营宝登录态会保留在客户电脑，不随停止操作删除。
+首次使用需要客户在 OpenClaw 配置页填写自己的模型 API Key，并在 Chrome 的 `chrome://extensions` 中加载 `extensions\customer-ai-rpa` 扩展。之后客户在自己的 Chrome 中登录客服平台，插件通过本地 WebSocket 连接 `http://127.0.0.1:3001`，不再由 Playwright 托管真实平台登录态。停止服务使用 `Stop-Customer-AI.bat`，运行状态检查使用 `Doctor-Customer-AI.bat`。数据库卷、知识库文件、插件配置和网页登录态会保留在客户电脑，不随停止操作删除。
+
+便携包启动后会自动打开：
+
+```text
+http://127.0.0.1:8787/kb-admin
+http://127.0.0.1:3001/rpa/extension/status
+docs\project-flow.html
+```
 
 ## 常见问题
 

@@ -18,5 +18,9 @@
   },
   "devDependencies": {
     "typescript": "^5.6.3"
-  }
+  },
+  "_fileDescription": "工作区统一启动、构建、迁移和便携包命令。",
+  "_fileModule": "根目录与配置",
+  "_relatedModules": "各子包 scripts。",
+  "description": "工作区统一启动、构建、迁移和便携包命令。"
 }

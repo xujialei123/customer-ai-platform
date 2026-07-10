@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/conversation.service.ts
+ * @module API Service 与 Worker
+ * @description 按平台、门店、客户创建隔离会话。
+ * @see 联动关注：Prisma 唯一键和 MessageService。
+ */
 import { nanoid } from 'nanoid';
 import { prisma } from '../lib/prisma.js';
 export class ConversationService {

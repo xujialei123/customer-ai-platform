@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/rpa/meituan.watcher.ts
+ * @module RPA 与 Chrome 插件
+ * @description 美团 Playwright Adapter 骨架。
+ * @see 联动关注：默认推荐使用 Chrome 插件。
+ */
 import { startDomMessageWatcher } from './dom-message-watcher.js';
 import { loadRpaWatcherConfig } from './selector-config.js';
 import { isAbsolute, resolve } from 'node:path';

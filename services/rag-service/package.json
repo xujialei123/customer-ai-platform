@@ -31,5 +31,9 @@
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
-  }
+  },
+  "_fileDescription": "8787 RAG 服务依赖、构建和测试命令。",
+  "_fileModule": "RAG Service 兼容层",
+  "_relatedModules": "pnpm-lock.yaml 和根 build:rag。",
+  "description": "8787 RAG 服务依赖、构建和测试命令。"
 }

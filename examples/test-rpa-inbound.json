@@ -1,4 +1,7 @@
 {
+  "_fileDescription": "RPA inbound POST 请求体样例。",
+  "_fileModule": "后台、文档、样例",
+  "_relatedModules": "routes/rpa.ts Schema 验证。",
   "platform": "meituan",
   "id": "msg-demo-001",
   "shopId": "shop-demo",

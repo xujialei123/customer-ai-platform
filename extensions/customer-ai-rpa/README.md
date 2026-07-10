@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file extensions/customer-ai-rpa/README.md
+  @module RPA 与 Chrome 插件
+  @description 扩展安装、测试步骤和安全注意事项。
+  @see 联动关注：插件行为变化时同步更新。
+-->
 # 客服中台 Chrome RPA 扩展
 
 该扩展运行在用户正常使用的 Chrome 中，不负责登录、不读取密码、不导出 Cookie。它只在已登录的经营宝页面中采集配置选择器命中的客户消息，并通过本机 WebSocket 发送到客服中台。

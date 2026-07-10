@@ -1,3 +1,9 @@
+/**
+ * @file extensions/customer-ai-rpa/popup.js
+ * @module RPA 与 Chrome 插件
+ * @description 扩展配置持久化、连接状态和 AI 选择器识别。
+ * @see 联动关注：Chrome storage API。
+ */
 const fields = ['shopId', 'messageItemSelector', 'messageTextSelector', 'replyInputSelector', 'sendButtonSelector', 'enabled', 'autoSwitchConversations', 'autoSend'];
 
 async function load() {

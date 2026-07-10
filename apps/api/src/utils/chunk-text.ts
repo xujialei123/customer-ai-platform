@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/utils/chunk-text.ts
+ * @module API Service 与 Worker
+ * @description 旧知识文本按段落/长度切片。
+ * @see 联动关注：不要用于替代 GBrain 知识卡片。
+ */
 // 中文知识库切分函数。
 // 这里先用简单字符窗口切分，后续可以升级成按标题、段落、Markdown 层级切分。
 export function chunkText(text, options = {}) {

@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file samples/kb/meituan-group-buy.md
+  @module 后台、文档、样例
+  @description 美团团购套餐测试样例。
+  @see 联动关注：套餐检索验证。
+-->
 # 美团到店团购规则
 
 美团团购券未使用且在有效期内时，可按美团平台页面规则申请退款。

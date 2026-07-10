@@ -1,5 +1,14 @@
+# @file pnpm-workspace.yaml
+# @module 根目录与配置
+# @description 声明 apps、services、packages 工作区和 pnpm allowBuilds。
+# @see 联动关注：新增包或生产依赖构建脚本时更新。
 packages:
   - "apps/*"
   - "services/*"
   - "packages/*"
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  msgpackr-extract: true
+  prisma: true
 virtualStoreDirMaxLength: 120

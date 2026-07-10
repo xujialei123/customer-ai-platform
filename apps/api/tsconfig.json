@@ -1,4 +1,7 @@
 {
+  "_fileDescription": "API TypeScript 编译配置。",
+  "_fileModule": "API 入口与基础设施",
+  "_relatedModules": "新增源码目录时更新 include。",
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
@@ -10,7 +13,11 @@
     "resolveJsonModule": true,
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }

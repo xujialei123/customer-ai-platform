@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/brain/knowledge-card-generator.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 从 FAQ、章节、字段和表格生成可检索知识卡片。
+ * @see 联动关注：分类标签与 Embedding 写入。
+ */
 import { nanoid } from 'nanoid';
 import { classifyIntent } from '../rag/intent-classifier.js';
 import { extractKeywords } from '../rag/keyword.js';

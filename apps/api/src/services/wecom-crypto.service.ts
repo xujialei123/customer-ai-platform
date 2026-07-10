@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/wecom-crypto.service.ts
+ * @module API Service 与 Worker
+ * @description 企微回调签名验证和 AES 消息加解密。
+ * @see 联动关注：WECOM_TOKEN/AES_KEY。
+ */
 import { createDecipheriv, createHash } from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 const xmlParser = new XMLParser({

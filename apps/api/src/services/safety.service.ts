@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/safety.service.ts
+ * @module API Service 与 Worker
+ * @description 高风险词、禁止承诺和自动发送开关判定。
+ * @see 联动关注：AGENTS.md 风控规则。
+ */
 export class SafetyService {
     highRiskKeywords = [
         '退款',

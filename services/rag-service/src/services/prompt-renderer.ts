@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/services/prompt-renderer.ts
+ * @module RAG Service 兼容层
+ * @description 旧 RAG Prompt 模板组合渲染。
+ * @see 联动关注：config/prompts/*.txt。
+ */
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { env } from '../config/env.js';

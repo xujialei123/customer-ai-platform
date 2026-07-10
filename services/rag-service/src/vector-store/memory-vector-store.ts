@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/vector-store/memory-vector-store.ts
+ * @module RAG Service 兼容层
+ * @description 内存向量检索（开发/测试用，重启清空）。
+ * @see 联动关注：仅本地流程验证。
+ */
 import { repository } from '../services/store.js';
 import { cosineSimilarity } from './vector-store.js';
 export class MemoryVectorStore {

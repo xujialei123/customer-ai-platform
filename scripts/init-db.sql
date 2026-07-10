@@ -1,3 +1,7 @@
+-- @file scripts/init-db.sql
+-- @module 数据库、共享包与交付
+-- @description 创建 RAG 相关表：Wiki、Card、Graph、Gap 和向量索引。
+-- @see 联动关注：KnowledgeStore 与向量维度配置。
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS rag_knowledge_bases (

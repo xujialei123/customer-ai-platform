@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/rpa/selector-config.ts
+ * @module RPA 与 Chrome 插件
+ * @description 读写平台 RPA DOM 选择器配置。
+ * @see 联动关注：RPA 配置路由和插件默认值。
+ */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/rpa/douyin.watcher.ts
+ * @module RPA 与 Chrome 插件
+ * @description 抖音 Playwright Adapter 骨架。
+ * @see 联动关注：真实接口未确认，保留 TODO。
+ */
 import { startDomMessageWatcher } from './dom-message-watcher.js';
 import { loadRpaWatcherConfig } from './selector-config.js';
 // 抖音来客 RPA watcher 骨架。

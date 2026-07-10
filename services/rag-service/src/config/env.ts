@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/config/env.ts
+ * @module RAG Service 兼容层
+ * @description Embedding、LLM、阈值、上传目录等环境变量。
+ * @see 联动关注：.env.example 和 Providers。
+ */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

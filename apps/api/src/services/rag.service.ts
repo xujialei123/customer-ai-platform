@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/rag.service.ts
+ * @module API Service 与 Worker
+ * @description 调用 8787 Hybrid RAG 并兼容旧 Chunk 格式。
+ * @see 联动关注：ReplyWorker、RAG_API_KEY。
+ */
 import { env } from '../config/env.js';
 
 export class RagService {

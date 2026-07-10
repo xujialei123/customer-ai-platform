@@ -1,3 +1,9 @@
+/**
+ * @file packages/rpa-sdk/src/index.ts
+ * @module 数据库、共享包与交付
+ * @description RPA SDK：askRagService、createMessageHash 等辅助函数。
+ * @see 联动关注：Watcher 和 Chrome 插件 inbound 链路。
+ */
 import { createHash } from 'node:crypto';
 import type { Platform, RagChatRequest, RagChatResponse } from '@customer-ai/shared';
 

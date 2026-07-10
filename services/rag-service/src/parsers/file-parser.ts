@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/parsers/file-parser.ts
+ * @module RAG Service 兼容层
+ * @description TXT/MD/CSV/PDF/DOCX/XLSX 文件解析。
+ * @see 联动关注：扫描 PDF 仍需 OCR Adapter。
+ */
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import mammoth from 'mammoth';

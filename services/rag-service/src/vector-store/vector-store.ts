@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/vector-store/vector-store.ts
+ * @module RAG Service 兼容层
+ * @description 向量存储抽象接口定义。
+ * @see 联动关注：memory 与 pgvector 实现。
+ */
 export function cosineSimilarity(left, right) {
     let dot = 0;
     let leftNorm = 0;

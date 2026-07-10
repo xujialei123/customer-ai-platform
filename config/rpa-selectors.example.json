@@ -1,4 +1,7 @@
 {
+  "_fileDescription": "RPA DOM 选择器示例，复制为 local 后现场验证。",
+  "_fileModule": "根目录与配置",
+  "_relatedModules": "Chrome 插件默认值和 selector-config.ts。",
   "douyin": {
     "url": "https://life.douyin.com/",
     "defaultShopId": "default-shop",

@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/intent-classifier.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 严格业务类别和多意图识别。
+ * @see 联动关注：阈值策略与风控联动。
+ */
 import type { KnowledgeCategory } from '../brain/types.js';
 import type { IntentClassifyResult } from './types.js';
 

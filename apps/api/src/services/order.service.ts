@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/order.service.ts
+ * @module API Service 与 Worker
+ * @description 订单号识别、多轮等待判断、公司系统查询和脱敏。
+ * @see 联动关注：订单 Adapter 和 ReplyWorker 路由。
+ */
 import { sm2 } from 'sm-crypto';
 import { z } from 'zod';
 import { env } from '../config/env.js';
@@ -200,6 +206,10 @@ export class OrderService {
     extractOrderNo(message) {
         if (!this.isOrderQuery(message))
             return null;
+        return this.extractOrderNoCandidate(message);
+    }
+    // 多轮查单时客户第二句通常只发送编号，因此候选提取不能强制当前句再次包含“订单”关键词。
+    extractOrderNoCandidate(message) {
         const labeled = message.match(/(?:订单号|订单id|单号|订单编号|order\s*no\.?|order\s*id)[：:\s-]*([A-Za-z0-9_-]{6,32})/i)?.[1];
         if (labeled)
             return labeled;
@@ -209,7 +219,15 @@ export class OrderService {
     extractPhone(message) {
         if (!this.isOrderQuery(message))
             return null;
+        return this.extractPhoneCandidate(message);
+    }
+    extractPhoneCandidate(message) {
         return message.match(/1[3-9]\d{9}/)?.[0] ?? null;
+    }
+    isAwaitingOrderIdentifier(history) {
+        // 只检查最近几轮客服话术，防止很早以前的查单流程长期污染后续普通字母数字消息。
+        return history.slice(-4).some((item) => item.role === 'assistant'
+            && /(提供|发送|补充|确认).{0,12}(订单号|订单编号|单号|下单手机号|手机号|取件码)/.test(item.content));
     }
     async queryOrder(orderNo) {
         // 返回统一的 found=false 结构而不是让模型根据空结果猜测订单状态。

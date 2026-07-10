@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/rpa/mock-site.watcher.ts
+ * @module RPA 与 Chrome 插件
+ * @description 旧 Mock 站点 Playwright Watcher。
+ * @see 联动关注：仅 playwright 模式调试。
+ */
 import { startDomMessageWatcher } from './dom-message-watcher.js';
 const platform = process.env.RPA_PLATFORM === 'meituan' ? 'meituan' : 'douyin';
 const mockUrl = process.env.RPA_MOCK_URL ?? `http://127.0.0.1:3100/?platform=${platform}`;

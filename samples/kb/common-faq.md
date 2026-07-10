@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file samples/kb/common-faq.md
+  @module 后台、文档、样例
+  @description 通用 FAQ 知识库上传测试样例。
+  @see 联动关注：kb-admin 上传编译测试。
+-->
 # 通用 FAQ
 
 ## 营业时间

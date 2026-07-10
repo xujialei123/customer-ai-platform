@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/hybrid-retriever.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 融合向量、关键词、Metadata 和 Graph 的混合检索。
+ * @see 联动关注：KnowledgeStore 和 Reranker。
+ */
 import { KnowledgeStore } from '../brain/knowledge-store.js';
 import type { KnowledgeCard } from '../brain/types.js';
 import { createEmbeddingProvider } from '../providers/embedding.js';

@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/rag-service.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description answerWithRag 总入口：检索→重排→生成→高风险转人工。
+ * @see 联动关注：ReplyWorker 通过 rag.service 调用。
+ */
 import { KnowledgeStore } from '../brain/knowledge-store.js';
 import { classifyIntent } from './intent-classifier.js';
 import { rewriteQuery } from './query-rewrite.js';

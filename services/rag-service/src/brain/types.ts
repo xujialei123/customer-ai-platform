@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/brain/types.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description Wiki、KnowledgeCard、Graph、Gap 等 Brain 类型。
+ * @see 联动关注：数据库表结构和 API Schema。
+ */
 export type KnowledgePlatform = 'meituan' | 'douyin' | 'wecom' | 'all';
 
 export type KnowledgeCategory =

@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/services/rag-application.ts
+ * @module RAG Service 兼容层
+ * @description 旧 Chunk ingest/chat 兼容链路。
+ * @see 联动关注：新链路优先 Hybrid 知识卡片。
+ */
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { nanoid } from 'nanoid';

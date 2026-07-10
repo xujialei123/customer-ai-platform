@@ -1,3 +1,9 @@
+<!--
+  @file docs/project-flow.html
+  @module 后台、文档、样例
+  @description 项目流程和文件职责总览（浏览器可直接打开）。
+  @see 联动关注：流程改动必须同步更新。
+-->
 <!doctype html>
 <html lang="zh-CN">
 <head>
@@ -135,6 +141,7 @@
       <section id="orders">
         <h2>八、公司订单查询</h2>
         <div class="flow"><div class="step">订单意图<small>订单号或手机号</small></div><div class="arrow">→</div><div class="step">Order Adapter<small>白名单只读调用</small></div><div class="arrow">→</div><div class="step">脱敏结果<small>不暴露鉴权和隐私</small></div><div class="arrow">→</div><div class="step">OpenClaw<small>结合真实结果回复</small></div></div>
+        <div class="notice">订单路由优先于知识库：当前句包含查单意图，或最近客服正在等待订单号/手机号时，纯订单号会直接进入 Order Adapter，完全跳过 Hybrid RAG。只有非订单消息才执行知识库检索。</div>
         <p>接口超时、鉴权失败、缺少订单号或查不到数据时必须转人工。未知企业接口继续保留 Adapter/TODO，不得编造官方接口。</p>
       </section>
 
@@ -167,6 +174,12 @@
       <section id="operation">
         <h2>十二、日常操作顺序</h2>
         <ol><li>执行 <code>pnpm dev</code> 并确认 Docker、OpenClaw、3001、3100、8787 正常。</li><li>打开 <code>http://127.0.0.1:8787/kb-admin</code> 上传并解析文件。</li><li>点击文件“编译”，审核 Wiki 和 Knowledge Cards。</li><li>按需设置卡片平台、门店、分类、关键词和优先级。</li><li>在 <code>chrome://extensions</code> 重新加载修改后的插件。</li><li>开启页面监听和自动处理未读；确认安全后再单独开启自动发送。</li></ol>
+        <div class="grid two" style="margin-top:16px">
+          <div class="card"><h3>开发启动</h3><p><code>pnpm dev</code> 会启动 API、RAG、Mock 页面，并按扩展模式等待 Chrome 插件连接。只有设置 <code>RPA_MOCK_MODE=playwright</code> 时才使用旧 Playwright watcher。</p></div>
+          <div class="card"><h3>Windows 便携交付</h3><p><code>pnpm package:windows</code> 会生成一体化目录包，包含生产构建、干净 OpenClaw、Chrome 扩展、文档和启停脚本。客户双击 <code>Start-Customer-AI.bat</code> 后自动启动 Docker、OpenClaw、RAG 和 API。</p></div>
+          <div class="card"><h3>首次客户配置</h3><p>客服电脑仍需安装 Docker Desktop 和 Chrome；首次在 OpenClaw 配置模型 Key，并在 <code>chrome://extensions</code> 加载 <code>extensions\customer-ai-rpa</code>。真实平台登录态由客户自己的 Chrome 保存。</p></div>
+          <div class="card"><h3>交付安全边界</h3><p>打包脚本不会复制本机 <code>.env</code>、OpenClaw <code>data</code>、Cookie、聊天记录或日志。自动发送默认关闭，需客户确认后在插件中单独开启。</p></div>
+        </div>
       </section>
 
       <section id="debug">

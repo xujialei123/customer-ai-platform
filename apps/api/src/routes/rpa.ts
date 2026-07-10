@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/routes/rpa.ts
+ * @module API Adapter 与路由
+ * @description RPA inbound/outbound、选择器配置和扩展状态。
+ * @see 联动关注：MessageService、Chrome 插件。
+ */
 import { z } from 'zod';
 import { getAdapter } from '../adapters/index.js';
 import { inboundMessageQueue } from '../lib/queue.js';

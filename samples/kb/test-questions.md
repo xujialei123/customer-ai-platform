@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file samples/kb/test-questions.md
+  @module 后台、文档、样例
+  @description RAG 回复质量测试问题清单。
+  @see 联动关注：手动回归测试。
+-->
 # 测试问题
 
 1. 这个套餐可以退款吗？

@@ -1,3 +1,9 @@
+/**
+ * @file extensions/customer-ai-rpa/background.js
+ * @module RPA 与 Chrome 插件
+ * @description WebSocket 连接、设置迁移、多会话路由和断线重连。
+ * @see 联动关注：extension-gateway.ts 协议。
+ */
 const DEFAULT_SETTINGS = {
   // 默认只监听和回填；自动点击发送必须由操作员明确开启，并持久化到 Chrome 扩展存储。
   settingsVersion: 3,

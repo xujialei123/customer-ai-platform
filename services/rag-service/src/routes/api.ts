@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/routes/api.ts
+ * @module RAG Service 兼容层
+ * @description KB CRUD、Wiki 编译、卡片、Graph、Gap、检索和回答 API。
+ * @see 联动关注：Brain 模块与 Hybrid RAG。
+ */
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import { env, safeEnvView } from '../config/env.js';

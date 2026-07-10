@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/adapters/meituan-rpa.adapter.ts
+ * @module API Adapter 与路由
+ * @description 美团 RPA/插件消息转 UnifiedMessage。
+ * @see 联动关注：插件 shopId/conversationId 映射。
+ */
 // 美团到店团购 RPA Adapter。
 // 注意：公开的美团 IM 回调主要偏外卖/闪购，到店团购第一版先用 RPA 骨架。
 export class MeituanRpaAdapter {

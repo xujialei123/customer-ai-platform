@@ -1,3 +1,7 @@
+# @file .gitignore
+# @module 根目录与配置
+# @description Git 忽略规则：node_modules、dist、会话目录等。
+# @see 联动关注：新增生成物目录时同步。
 # 本地依赖和构建产物不进入版本管理，避免不同机器之间互相污染。
 node_modules/
 apps/*/dist/

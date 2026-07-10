@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/embedding.service.ts
+ * @module API Service 与 Worker
+ * @description API 旧知识表 Embedding 兼容实现。
+ * @see 联动关注：新检索由 8787 rag-service 负责。
+ */
 import { createHash } from 'node:crypto';
 import { env } from '../config/env.js';
 export class EmbeddingService {

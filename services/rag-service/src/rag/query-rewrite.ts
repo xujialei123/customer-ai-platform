@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/query-rewrite.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 多意图 query 改写和关键词扩展。
+ * @see 联动关注：IntentClassifier 与 HybridRetriever。
+ */
 import { extractKeywords } from './keyword.js';
 import { classifyIntent, detectIntentCategories } from './intent-classifier.js';
 import type { QueryRewriteResult } from './types.js';

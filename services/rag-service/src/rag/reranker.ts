@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/reranker.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 可选 LLM 重排候选卡片。
+ * @see 联动关注：失败时回退 Hybrid 原始排序。
+ */
 import { env } from '../config/env.js';
 import { createLLMProvider } from '../providers/llm.js';
 import type { RetrievalCandidate } from './types.js';

@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/vector-store/pg-vector-store.ts
+ * @module RAG Service 兼容层
+ * @description Chunk 级 pgvector 写入和相似度检索。
+ * @see 联动关注：向量维度与 HNSW 索引。
+ */
 import pg from 'pg';
 import { env } from '../config/env.js';
 export class PgVectorStore {

@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/types.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description Hybrid RAG 请求、响应和候选卡片类型。
+ * @see 联动关注：API 路由与 Retriever。
+ */
 import type { IntentClassifyResult, QueryRewriteResult } from './types-internal.js';
 import type { KnowledgeCard, KnowledgeCategory, KnowledgePlatform } from '../brain/types.js';
 

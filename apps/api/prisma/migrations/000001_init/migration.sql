@@ -1,3 +1,7 @@
+-- @file apps/api/prisma/migrations/000001_init/migration.sql
+-- @module API 入口与基础设施
+-- @description 初始化业务表和 pgvector 扩展。
+-- @see 联动关注：已执行迁移不要重写。
 -- 启用 pgvector 扩展，用于 RAG 向量检索
 CREATE EXTENSION IF NOT EXISTS vector;
 

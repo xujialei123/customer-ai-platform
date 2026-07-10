@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/brain/brain-sync.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 串联解析→Wiki→卡片→向量→Graph 的编译主流程。
+ * @see 联动关注：编译 API 核心编排。
+ */
 import { createEmbeddingProvider } from '../providers/embedding.js';
 import { parseDocument } from './document-parser.js';
 import { GraphBuilder } from './graph-builder.js';

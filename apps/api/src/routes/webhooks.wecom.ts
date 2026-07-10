@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/routes/webhooks.wecom.ts
+ * @module API Adapter 与路由
+ * @description 企微 URL 校验和消息回调入口。
+ * @see 联动关注：Crypto、Adapter、WecomClient。
+ */
 import { env } from '../config/env.js';
 import { getAdapter } from '../adapters/index.js';
 import { inboundMessageQueue } from '../lib/queue.js';

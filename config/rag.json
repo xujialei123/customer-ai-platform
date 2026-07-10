@@ -1,4 +1,7 @@
 {
+  "_fileDescription": "旧 RAG 参数兼容配置（阈值、TopK 等）。",
+  "_fileModule": "根目录与配置",
+  "_relatedModules": "Hybrid 配置和环境变量。",
   "topK": 5,
   "scoreThreshold": 0.72,
   "maxContextChars": 6000,

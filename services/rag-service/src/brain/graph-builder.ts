@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/brain/graph-builder.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 构建有限知识关系图（避免全连接爆炸）。
+ * @see 联动关注：Graph 检索权重。
+ */
 import { nanoid } from 'nanoid';
 import type { KnowledgeCard, KnowledgeGraphEdge } from './types.js';
 

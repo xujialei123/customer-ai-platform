@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/brain/wiki-compiler.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description LLM 生成结构化 Wiki，失败时本地规则回退。
+ * @see 联动关注：wiki-compiler.prompt.ts 和卡片生成。
+ */
 import { nanoid } from 'nanoid';
 import { createLLMProvider } from '../providers/llm.js';
 import { classifyIntent } from '../rag/intent-classifier.js';

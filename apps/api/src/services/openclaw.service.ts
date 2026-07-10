@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/openclaw.service.ts
+ * @module API Service 与 Worker
+ * @description OpenClaw 回复生成、订单意图识别和纯文本清理。
+ * @see 联动关注：ReplyWorker 与 Token 文件。
+ */
 import { env } from '../config/env.js';
 import { z } from 'zod';
 const orderActionSchema = z.object({

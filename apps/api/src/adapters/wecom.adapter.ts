@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/adapters/wecom.adapter.ts
+ * @module API Adapter 与路由
+ * @description 解析企微客服和应用消息为 UnifiedMessage。
+ * @see 联动关注：Webhook、加解密和发送出口。
+ */
 import { nanoid } from 'nanoid';
 import { WeComClient } from '../services/wecom-client.service.js';
 // 企业微信 Adapter。

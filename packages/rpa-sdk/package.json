@@ -13,5 +13,9 @@
   },
   "devDependencies": {
     "@types/node": "22.10.2"
-  }
+  },
+  "_fileDescription": "RPA SDK 包定义与构建命令。",
+  "_fileModule": "数据库、共享包与交付",
+  "_relatedModules": "根 build:packages。",
+  "description": "RPA SDK 包定义与构建命令。"
 }

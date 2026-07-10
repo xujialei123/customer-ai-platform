@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/rpa/dom-message-watcher.ts
+ * @module RPA 与 Chrome 插件
+ * @description 旧 Playwright DOM 消息监听和自动发送。
+ * @see 联动关注：不能与默认 Chrome 插件重复运行。
+ */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotEnv } from 'dotenv';

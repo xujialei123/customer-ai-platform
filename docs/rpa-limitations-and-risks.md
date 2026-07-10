@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file docs/rpa-limitations-and-risks.md
+  @module 后台、文档、样例
+  @description RPA 能力边界、风险和汇报口径。
+  @see 联动关注：真实账号验证结果。
+-->
 # RPA 方案局限、难点与当前问题
 
 ## 1. 文档目的

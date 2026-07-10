@@ -1,3 +1,7 @@
+# @file packaging/windows-portable/Start-Customer-AI.ps1
+# @module 数据库、共享包与交付
+# @description 便携环境检查与一键启动全部服务。
+# @see 联动关注：Docker/OpenClaw/RAG/API/扩展状态页。
 #Requires -Version 5.1
 [CmdletBinding()]
 param()
@@ -83,12 +87,17 @@ Start-Process 'http://127.0.0.1:18788/' | Out-Null
 
 Start-AppProcess 'rag-service' (Join-Path $Root 'app\rag-service\dist\main.js') (Join-Path $Root 'app\rag-service')
 if (-not (Wait-Http 'http://127.0.0.1:8787/health' 60)) { throw 'RAG service failed to start. Check data\logs.' }
-Start-AppProcess 'api' (Join-Path $Root 'app\api\dist\main.js') (Join-Path $Root 'app\api')
+# 便携包默认走 Chrome 扩展 + 本地 WebSocket。这样客服使用自己的真实 Chrome 登录态，
+# 不需要 Playwright 重新登录，也能避开平台对自动化浏览器的风控。
+$env:RPA_MOCK_MODE = 'extension'
+Start-AppProcess 'api' (Join-Path $Root 'app\backend\dist\main.js') (Join-Path $Root 'app\backend')
 if (-not (Wait-Http 'http://127.0.0.1:3001/health' 60)) { throw 'API service failed to start. Check data\logs.' }
-Start-AppProcess 'meituan-rpa' (Join-Path $Root 'app\api\dist\rpa\meituan-real.watcher.js') (Join-Path $Root 'app\api')
 
 Start-Process 'http://127.0.0.1:8787/kb-admin' | Out-Null
+Start-Process 'http://127.0.0.1:3001/rpa/extension/status' | Out-Null
+Start-Process (Join-Path $Root 'docs\project-flow.html') | Out-Null
 Write-Host 'Customer AI workspace is running.' -ForegroundColor Green
 Write-Host 'Knowledge Base: http://127.0.0.1:8787/kb-admin'
 Write-Host 'API:            http://127.0.0.1:3001/health'
 Write-Host 'OpenClaw:       http://127.0.0.1:18789/'
+Write-Host 'RPA Extension:  extensions\customer-ai-rpa'

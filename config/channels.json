@@ -1,9 +1,16 @@
 {
+  "_fileDescription": "各平台渠道开关、默认 shopId、知识库绑定和 dryRun 策略。",
+  "_fileModule": "根目录与配置",
+  "_relatedModules": "平台 Adapter 与 RAG 知识路由。",
   "douyin": {
     "enabled": true,
     "platform": "douyin",
     "shopId": "douyin_shop_001",
-    "kbIds": ["kb_common", "kb_douyin", "kb_after_sales"],
+    "kbIds": [
+      "kb_common",
+      "kb_douyin",
+      "kb_after_sales"
+    ],
     "autoReply": false,
     "dryRun": true,
     "replyDelayMs": 800,
@@ -14,7 +21,11 @@
     "enabled": true,
     "platform": "meituan",
     "shopId": "meituan_shop_001",
-    "kbIds": ["kb_common", "kb_meituan", "kb_after_sales"],
+    "kbIds": [
+      "kb_common",
+      "kb_meituan",
+      "kb_after_sales"
+    ],
     "autoReply": false,
     "dryRun": true,
     "replyDelayMs": 1200,
@@ -25,7 +36,11 @@
     "enabled": true,
     "platform": "wecom",
     "shopId": "default",
-    "kbIds": ["kb_common", "kb_product", "kb_wecom"],
+    "kbIds": [
+      "kb_common",
+      "kb_product",
+      "kb_wecom"
+    ],
     "autoReply": false,
     "dryRun": true,
     "replyDelayMs": 500,

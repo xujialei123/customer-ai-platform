@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/providers/llm.ts
+ * @module RAG Service 兼容层
+ * @description LLM Provider（mock/OpenAI/Agenes/OpenClaw）。
+ * @see 联动关注：Wiki 编译、Rerank、Answer 生成。
+ */
 import { env } from '../config/env.js';
 async function retry(task, times = 2) {
     // 通用 Provider 可配置有限重试；客服实时链路中的 OpenClaw 会单独关闭重试，避免长时间阻塞。

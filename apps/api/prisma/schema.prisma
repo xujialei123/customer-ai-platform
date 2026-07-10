@@ -1,3 +1,7 @@
+/// @file apps/api/prisma/schema.prisma
+/// @module API 入口与基础设施
+/// @description 业务数据模型：门店、会话、消息、草稿和旧知识片段。
+/// @see 联动关注：迁移文件与各 Service 查询。
 generator client {
   provider = "prisma-client-js"
 }

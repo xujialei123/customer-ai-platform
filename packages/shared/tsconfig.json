@@ -1,4 +1,7 @@
 {
+  "_fileDescription": "共享包 TypeScript 编译配置。",
+  "_fileModule": "数据库、共享包与交付",
+  "_relatedModules": "导出路径与 dist 输出。",
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
@@ -9,5 +12,7 @@
     "rootDir": "src",
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }

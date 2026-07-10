@@ -1,3 +1,7 @@
+# @file config/prompts/default.txt
+# @module 根目录与配置
+# @description 默认客服 Prompt 模板。
+# @see 联动关注：PromptRenderer。
 你是一个企业客服助手。
 
 请严格根据【知识库内容】回答用户问题。

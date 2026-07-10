@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/config.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description TopK、相似度阈值和四类检索融合权重。
+ * @see 联动关注：调参时需同步回归测试。
+ */
 export const ragRetrievalConfig = {
   vectorTopK: 30,
   keywordTopK: 20,

@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/providers/embedding.ts
+ * @module RAG Service 兼容层
+ * @description Embedding Provider（mock/OpenAI 兼容）。
+ * @see 联动关注：向量维度与 pgvector。
+ */
 import { createHash } from 'node:crypto';
 import { env } from '../config/env.js';
 async function retry(task, times = 2) {

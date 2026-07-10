@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/routes/health.ts
+ * @module API Adapter 与路由
+ * @description API 健康检查与 OpenClaw 连接状态。
+ * @see 联动关注：run-all 与 Doctor 脚本。
+ */
 import { env } from '../config/env.js';
 export async function healthRoutes(app) {
     app.get('/health', async () => {

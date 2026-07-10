@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file AGENTS.md
+  @module 根目录与配置
+  @description AI/Codex 开发约束、编码、注释、架构、安全和流程文档同步规则。
+  @see 联动关注：所有任务开始前读取，禁止删除编码和风控限制。
+-->
 # AGENTS.md - Codex / AI 开发约束说明
 
 本项目是一个「多平台 AI 客服中台」项目，用于统一接入企业微信客服、抖音来客、美团到店团购等客服入口，并通过 RAG 知识库 + OpenClaw/LLM 生成回复。

@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file docs/project-walkthrough.md
+  @module 后台、文档、样例
+  @description 新人代码阅读顺序和模块导览。
+  @see 联动关注：目录与入口变化时更新。
+-->
 # 多平台 AI 客服中台项目梳理指南
 
 ## 1. 文档用途

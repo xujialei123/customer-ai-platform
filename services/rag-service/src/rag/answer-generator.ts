@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/answer-generator.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 根据召回卡片生成纯文本客服回答。
+ * @see 联动关注：LLM Provider 和 Prompt。
+ */
 import { createLLMProvider } from '../providers/llm.js';
 import type { IntentClassifyResult, RetrievalCandidate } from './types.js';
 import { NO_ANSWER_TEXT } from './fallback.js';

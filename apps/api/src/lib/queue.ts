@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/lib/queue.ts
+ * @module API 入口与基础设施
+ * @description 创建 Redis/BullMQ 连接与 inbound 消息队列。
+ * @see 联动关注：ReplyWorker 和队列排障。
+ */
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { env } from '../config/env.js';

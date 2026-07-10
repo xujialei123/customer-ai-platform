@@ -1,3 +1,7 @@
+# @file docker-compose.yml
+# @module 根目录与配置
+# @description 启动 PostgreSQL/pgvector 与 Redis。
+# @see 联动关注：数据库、Redis 环境变量和端口文档。
 services:
   postgres:
     image: pgvector/pgvector:pg16

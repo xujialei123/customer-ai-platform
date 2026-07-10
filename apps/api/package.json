@@ -11,6 +11,7 @@
     "dev": "tsx watch src/main.ts",
     "dev:all": "tsx src/dev/run-all.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "tsx --test src/**/*.test.ts",
     "start": "node dist/main.js",
     "rpa:mock-site": "tsx src/rpa/mock-chat-server.ts",
     "rpa:mock-watch": "tsx src/rpa/mock-site.watcher.ts",
@@ -39,5 +40,9 @@
     "prisma": "^6.19.3",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
-  }
+  },
+  "_fileDescription": "API 服务依赖及 dev、build、Prisma、RPA Mock 命令。",
+  "_fileModule": "API 入口与基础设施",
+  "_relatedModules": "根 package.json 和 pnpm-lock.yaml。",
+  "description": "API 服务依赖及 dev、build、Prisma、RPA Mock 命令。"
 }

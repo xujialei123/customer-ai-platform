@@ -1,3 +1,7 @@
+# @file packaging/windows-portable/使用说明.txt
+# @module 数据库、共享包与交付
+# @description 最终用户安装扩展和日常启停说明。
+# @see 联动关注：交付流程变化时同步。
 客服 AI Windows 一体化便携包
 
 外部依赖：Windows 10/11 64 位、Google Chrome、Docker Desktop。
@@ -6,13 +10,17 @@
 1. 安装并启动 Docker Desktop。
 2. 双击 Start-Customer-AI.bat。
 3. 在 OpenClaw 配置页填写客户自己的模型 API Key。
-4. 在经营宝专用 Chrome 窗口人工登录一次。
-5. 打开知识库页面上传门店资料。
+4. 打开 Chrome 扩展管理页 chrome://extensions，开启开发者模式。
+5. 选择“加载已解压的扩展程序”，选择 extensions\customer-ai-rpa。
+6. 在客服平台页面中人工登录一次，插件会通过本地 WebSocket 连接服务。
+7. 打开知识库页面上传门店资料。
 
 日常使用：
 - 启动：Start-Customer-AI.bat
 - 停止：Stop-Customer-AI.bat
 - 检查：Doctor-Customer-AI.bat
+- 插件状态：http://127.0.0.1:3001/rpa/extension/status
+- 项目流程：docs\project-flow.html
 
 安全规则：
 - 默认关闭真实自动发送，先在草稿模式验证。

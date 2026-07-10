@@ -1,4 +1,7 @@
 {
+  "_fileDescription": "RAG 服务 TypeScript 严格编译配置。",
+  "_fileModule": "RAG Service 兼容层",
+  "_relatedModules": "所有新增 src 源码。",
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
@@ -9,7 +12,11 @@
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }

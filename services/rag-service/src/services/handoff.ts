@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/services/handoff.ts
+ * @module RAG Service 兼容层
+ * @description 旧 RAG 转人工规则加载与判定。
+ * @see 联动关注：config/handoff-rules.json。
+ */
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { env } from '../config/env.js';

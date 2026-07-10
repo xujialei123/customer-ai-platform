@@ -1,3 +1,9 @@
+/**
+ * @file extensions/customer-ai-rpa/content.js
+ * @module RPA 与 Chrome 插件
+ * @description DOM/Shadow DOM 消息采集、未读队列、会话切换、回填和发送。
+ * @see 联动关注：平台 DOM 变化与串话防护。
+ */
 if (!globalThis.__customerAiRpaInjected) {
 globalThis.__customerAiRpaInjected = true;
 const seenMessages = new Set();

@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/rpa/extension-gateway.ts
+ * @module RPA 与 Chrome 插件
+ * @description 本地 WebSocket 网关：会话注册、messageId 草稿关联和状态推送。
+ * @see 联动关注：background.js 通信协议。
+ */
 import { createHash } from 'node:crypto';
 
 const clients = new Set();

@@ -1,4 +1,7 @@
 {
+  "_fileDescription": "转人工关键词、置信度阈值和禁止承诺规则。",
+  "_fileModule": "根目录与配置",
+  "_relatedModules": "SafetyService、RAG handoff 和测试。",
   "lowConfidenceThreshold": 0.65,
   "hardRejectThreshold": 0.35,
   "maxContinuousAiReplies": 5,

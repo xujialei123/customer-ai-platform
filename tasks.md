@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file tasks.md
+  @module 根目录与配置
+  @description 项目分阶段任务和实施顺序。
+  @see 联动关注：每阶段完成后运行类型检查或最小测试。
+-->
 # TASKS.md - 项目开发任务清单
 
 本文档用于给 Codex / 开发人员按阶段推进项目。

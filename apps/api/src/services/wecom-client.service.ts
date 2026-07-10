@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/wecom-client.service.ts
+ * @module API Service 与 Worker
+ * @description 企微 access_token 获取和官方发送 API 请求。
+ * @see 联动关注：企微环境变量。
+ */
 import { env } from '../config/env.js';
 const accessTokenCache = {
     token: '',

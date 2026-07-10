@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/rpa/browser.ts
+ * @module RPA 与 Chrome 插件
+ * @description Playwright persistent context 浏览器启动器（兼容模式）。
+ * @see 联动关注：非默认插件模式时使用。
+ */
 import { chromium } from 'playwright';
 // 使用 persistent context 保存登录态。
 // 这样你手动扫码/登录一次后，后续可以复用浏览器用户数据目录。

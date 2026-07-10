@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file docs/hybrid-rag-and-gbrain.md
+  @module 后台、文档、样例
+  @description Hybrid RAG 与 GBrain 架构实现说明。
+  @see 联动关注：RAG 架构变化时更新。
+-->
 # LLM Wiki、GBrain 与 Hybrid RAG
 
 ## 处理链路

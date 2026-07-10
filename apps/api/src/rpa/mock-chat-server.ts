@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/rpa/mock-chat-server.ts
+ * @module RPA 与 Chrome 插件
+ * @description 3100 端口多会话 Mock 聊天页，支持随机消息和页面发送。
+ * @see 联动关注：content.js 选择器调试。
+ */
 import { createServer } from 'node:http';
 
 const port = Number(process.env.RPA_MOCK_PORT ?? 3100);

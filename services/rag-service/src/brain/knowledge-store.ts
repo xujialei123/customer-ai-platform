@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/brain/knowledge-store.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description Wiki/Card/Graph/Gap 的 PostgreSQL CRUD。
+ * @see 联动关注：init-db.sql 和 kb-admin 后台。
+ */
 import pg from 'pg';
 import { nanoid } from 'nanoid';
 import { env } from '../config/env.js';

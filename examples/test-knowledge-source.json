@@ -1,4 +1,7 @@
 {
+  "_fileDescription": "旧知识接口 POST 请求体样例。",
+  "_fileModule": "后台、文档、样例",
+  "_relatedModules": "routes/knowledge.ts 调试。",
   "shopId": "shop-demo",
   "title": "双人烤肉套餐规则",
   "sourceType": "manual",

@@ -1,10 +1,16 @@
+/**
+ * @file docs/project-files.js
+ * @module 后台、文档、样例
+ * @description project-flow.html 的文件职责索引数据和搜索渲染。
+ * @see 联动关注：新增/移动核心文件时同步。
+ */
 const fileGroups = [
   ['根目录与配置', [
     ['AGENTS.md', 'AI/Codex 开发约束、编码、注释、架构、安全和流程文档同步规则。', '所有任务开始前读取，禁止删除编码和风控限制。'],
     ['tasks.md', '项目分阶段任务和实施顺序。', '每阶段完成后运行类型检查或最小测试。'],
     ['README.md', '项目入口、启动、接口地址和交付说明。', '端口、启动与交付变化时同步。'],
     ['package.json', '工作区统一启动、构建、迁移和便携包命令。', '各子包 scripts。'],
-    ['pnpm-workspace.yaml', '声明 apps、services 和 packages 工作区。', '新增包时更新。'],
+    ['pnpm-workspace.yaml', '声明 apps、services、packages 工作区和 pnpm allowBuilds。', '新增包或生产依赖构建脚本时更新。'],
     ['pnpm-lock.yaml', '锁定依赖版本。', '由 pnpm 生成，禁止手工编辑。'],
     ['docker-compose.yml', '启动 PostgreSQL/pgvector 与 Redis。', '数据库、Redis 环境变量和端口文档。'],
     ['config/channels.json', '渠道和默认策略。', '平台 Adapter 与知识路由。'],
@@ -50,13 +56,14 @@ const fileGroups = [
     ['apps/api/src/services/knowledge.service.ts', '旧知识片段写入和搜索。', '避免与 rag-service 再次分叉。'],
     ['apps/api/src/services/rag.service.ts', '调用 8787 Hybrid 检索并兼容旧 Chunk。', 'ReplyWorker、RAG API Key。'],
     ['apps/api/src/services/openclaw.service.ts', 'OpenClaw 回复、订单意图、DOM 分析和纯文本清理。', 'ReplyWorker 与 Token。'],
-    ['apps/api/src/services/order.service.ts', '订单识别、公司系统查询和脱敏。', '订单 Adapter/TODO。'],
+    ['apps/api/src/services/order.service.ts', '订单识别、多轮等待订单号判断、公司系统查询和脱敏。', '订单 Adapter/TODO。'],
+    ['apps/api/src/services/order-routing.test.ts', '回归测试多轮纯订单号路由和普通编号防误判。', 'OrderService 与 ReplyWorker 路由顺序。'],
     ['apps/api/src/services/safety.service.ts', '高风险、禁止承诺和自动发送判定。', 'AGENTS 风控。'],
     ['apps/api/src/services/send.service.ts', '选择平台发送出口并检查全局开关。', '企微 Client、RPA 开关。'],
     ['apps/api/src/services/wecom-client.service.ts', '企微 Token 和官方发送请求。', '企微环境变量。'],
     ['apps/api/src/services/wecom-crypto.service.ts', '企微签名验证和消息加解密。', 'Token/AES Key。'],
     ['apps/api/src/utils/chunk-text.ts', '旧知识文本切片。', '不要用于替代知识卡片。'],
-    ['apps/api/src/workers/reply.worker.ts', '消费消息队列，执行 RAG、订单、OpenClaw、风控和草稿生成。', '回复主链路排障入口。']
+    ['apps/api/src/workers/reply.worker.ts', '消费消息队列；先做多轮订单路由，非订单才执行 RAG，再调用 OpenClaw、风控和生成草稿。', '回复主链路排障入口。']
   ]],
   ['RPA 与 Chrome 插件', [
     ['apps/api/src/rpa/extension-gateway.ts', '本地 WebSocket、会话注册、messageId 草稿关联和状态。', 'background.js 协议。'],
@@ -127,7 +134,7 @@ const fileGroups = [
     ['scripts/init-db.sql', '创建 RAG、Wiki、Card、Graph、Gap 和索引。', 'KnowledgeStore 与向量维度。'],
     ['scripts/dev-start.js', '开发启动兼容脚本。', 'run-all。'],
     ['scripts/start-openclaw-detached.ps1', '后台启动便携 OpenClaw。', '便携根目录。'],
-    ['scripts/build-windows-portable.ps1', '组装 Windows 便携包。', 'packaging 和 release。'],
+    ['scripts/build-windows-portable.ps1', '组装 Windows 便携包，并复制干净 OpenClaw、扩展、文档、样例和 Prisma Client。', '敏感 data 排除、app/backend 和 release。'],
     ['packages/shared/src/index.ts', '跨包 UnifiedMessage 等类型。', 'Adapter/API/SDK。'],
     ['packages/shared/package.json', '共享包定义。', '根构建。'],
     ['packages/shared/tsconfig.json', '共享包编译配置。', '导出路径。'],
@@ -135,12 +142,12 @@ const fileGroups = [
     ['packages/rpa-sdk/package.json', 'RPA SDK 包定义。', '根构建。'],
     ['packages/rpa-sdk/tsconfig.json', 'RPA SDK 编译配置。', '源码导出。'],
     ['packaging/windows-portable/Start-Customer-AI.bat', '双击启动入口。', 'Start PowerShell。'],
-    ['packaging/windows-portable/Start-Customer-AI.ps1', '便携环境检查与启动。', 'Docker/OpenClaw/日志。'],
+    ['packaging/windows-portable/Start-Customer-AI.ps1', '便携环境检查与一键启动。', 'Docker/OpenClaw/RAG/API/扩展状态页。'],
     ['packaging/windows-portable/Stop-Customer-AI.bat', '双击停止入口。', 'Stop PowerShell。'],
     ['packaging/windows-portable/Stop-Customer-AI.ps1', '停止本项目服务。', '不得误杀无关进程。'],
     ['packaging/windows-portable/Doctor-Customer-AI.bat', '双击诊断入口。', 'Doctor PowerShell。'],
-    ['packaging/windows-portable/Doctor-Customer-AI.ps1', '检查端口和服务健康。', '端口变化同步。'],
-    ['packaging/windows-portable/使用说明.txt', '最终用户操作说明。', '交付变化同步。']
+    ['packaging/windows-portable/Doctor-Customer-AI.ps1', '检查端口、OpenClaw、RAG、API 和扩展文件。', '端口变化同步。'],
+    ['packaging/windows-portable/使用说明.txt', '最终用户安装扩展和日常启停说明。', '交付变化同步。']
   ]],
   ['后台、文档、样例与生成物', [
     ['services/rag-service/public/kb-admin.html', '知识上传、Wiki 编译、卡片、Graph 和 Gap 后台。', 'RAG API Schema。'],

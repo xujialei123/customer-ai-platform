@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/adapters/douyin-rpa.adapter.ts
+ * @module API Adapter 与路由
+ * @description 抖音 RPA 原始 payload 转 UnifiedMessage。
+ * @see 联动关注：RPA inbound 和 ReplyWorker。
+ */
 // 抖音 RPA Adapter。
 // 第一版默认只生成建议回复，不自动发送。后续可以用 Playwright 操作抖音来客后台。
 export class DouyinRpaAdapter {

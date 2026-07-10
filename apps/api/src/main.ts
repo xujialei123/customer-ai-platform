@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/main.ts
+ * @module API 入口与基础设施
+ * @description 创建 Fastify 实例，注册路由、ReplyWorker 和 RPA WebSocket 网关。
+ * @see 联动关注：routes/*、workers/reply.worker.ts、extension-gateway.ts。
+ */
 import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
 import Fastify from 'fastify';

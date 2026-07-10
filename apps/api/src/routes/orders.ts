@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/routes/orders.ts
+ * @module API Adapter 与路由
+ * @description 订单查询 HTTP 测试接口。
+ * @see 联动关注：OrderService 和订单 Adapter。
+ */
 import { z } from 'zod';
 import { OrderService } from '../services/order.service.js';
 const querySchema = z.object({

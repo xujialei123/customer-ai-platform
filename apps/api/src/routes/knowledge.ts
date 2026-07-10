@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/routes/knowledge.ts
+ * @module API Adapter 与路由
+ * @description 旧知识库接口兼容层。
+ * @see 联动关注：新知识优先走 8787 rag-service。
+ */
 import { z } from 'zod';
 import { KnowledgeService } from '../services/knowledge.service.js';
 import { RagService } from '../services/rag.service.js';

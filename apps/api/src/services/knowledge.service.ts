@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/knowledge.service.ts
+ * @module API Service 与 Worker
+ * @description 旧知识片段写入和向量搜索。
+ * @see 联动关注：避免与 rag-service 再次分叉。
+ */
 import { nanoid } from 'nanoid';
 import { prisma } from '../lib/prisma.js';
 import { chunkText } from '../utils/chunk-text.js';

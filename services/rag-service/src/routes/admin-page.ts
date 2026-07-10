@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/routes/admin-page.ts
+ * @module RAG Service 兼容层
+ * @description 提供 /kb-admin 知识库管理页面路由。
+ * @see 联动关注：public/kb-admin.html。
+ */
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 export async function adminPageRoutes(app) {

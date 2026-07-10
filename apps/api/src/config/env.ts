@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/config/env.ts
+ * @module API 入口与基础设施
+ * @description UTF-8 读取根 .env 并校验 API 所需环境变量。
+ * @see 联动关注：.env.example 和各 Service。
+ */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

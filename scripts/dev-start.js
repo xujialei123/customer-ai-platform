@@ -1,3 +1,9 @@
+/**
+ * @file scripts/dev-start.js
+ * @module 数据库、共享包与交付
+ * @description 开发启动兼容脚本（旧入口）。
+ * @see 联动关注：run-all.ts 编排。
+ */
 import { spawn } from 'node:child_process';
 
 const commands = [

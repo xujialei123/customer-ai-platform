@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/services/message.service.ts
+ * @module API Service 与 Worker
+ * @description 消息去重、入库、摘要更新、outbound 确认和草稿关闭。
+ * @see 联动关注：RPA outbound、ReplyDraft。
+ */
 import { prisma } from '../lib/prisma.js';
 import { ConversationService } from './conversation.service.js';
 export class MessageService {

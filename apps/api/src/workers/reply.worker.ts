@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/workers/reply.worker.ts
+ * @module API Service 与 Worker
+ * @description 消费 inbound 队列：先订单路由，再 RAG，再 OpenClaw、风控和草稿生成。
+ * @see 联动关注：回复主链路排障入口。
+ */
 import { Worker } from 'bullmq';
 import { nanoid } from 'nanoid';
 import { env } from '../config/env.js';
@@ -28,18 +34,19 @@ export function startReplyWorker() {
         if (!inboundMessage || !inboundMessage.content)
             return;
         const conversation = inboundMessage.conversation;
-        // 先检索知识库，再让 AI 基于知识库回答。
-        const ragContext = await ragService.search({
-            platform: conversation.platform,
-            shopId: conversation.shopId,
-            query: inboundMessage.content,
-            topK: 6
-        });
-        // 订单查询只在明确识别到订单意图和订单号时调用公司系统，避免每条闲聊都访问内部接口。
+        // 必须先恢复多轮上下文并执行订单路由；订单号属于工具参数，不能先送到知识库检索。
+        const history = await messageService.getRecentHistory(conversation.id, 12, inboundMessage.id);
+        const awaitingOrderIdentifier = orderService.isAwaitingOrderIdentifier(history);
+        const ragContext = [];
+        // 当前句有查单意图，或上一轮客服明确索要订单号时，才允许把纯字母数字串当作订单号。
         // 查询结果会转换成脱敏、只读的检索片段，与知识库一起交给 OpenClaw，不暴露原始接口数据。
-        const orderNo = orderService.extractOrderNo(inboundMessage.content);
-        const orderPhone = orderService.extractPhone(inboundMessage.content);
+        const orderNo = orderService.extractOrderNo(inboundMessage.content)
+            ?? (awaitingOrderIdentifier ? orderService.extractOrderNoCandidate(inboundMessage.content) : null);
+        const orderPhone = orderService.extractPhone(inboundMessage.content)
+            ?? (awaitingOrderIdentifier ? orderService.extractPhoneCandidate(inboundMessage.content) : null);
+        let routedToOrderSystem = false;
         if (orderNo) {
+            routedToOrderSystem = true;
             try {
                 const order = await orderService.queryOrder(orderNo);
                 ragContext.unshift(orderService.toRagHit(order));
@@ -49,6 +56,7 @@ export function startReplyWorker() {
             }
         }
         else if (orderPhone) {
+            routedToOrderSystem = true;
             try {
                 const orders = await orderService.queryOrdersByPhone(orderPhone);
                 ragContext.unshift(orderService.toPhoneRagHit(orderPhone, orders));
@@ -58,6 +66,7 @@ export function startReplyWorker() {
             }
         }
         else if (orderService.isOrderQuery(inboundMessage.content)) {
+            routedToOrderSystem = true;
             // 没提供订单号时不猜测，加入明确提示，让模型只向客户索要订单号。
             ragContext.unshift({
                 id: 'order-system:missing-order-no',
@@ -66,12 +75,20 @@ export function startReplyWorker() {
                 score: 1
             });
         }
+        if (!routedToOrderSystem) {
+            // 只有非订单消息才进入 Hybrid RAG，避免订单号被当成普通知识问题。
+            ragContext.push(...await ragService.search({
+                platform: conversation.platform,
+                shopId: conversation.shopId,
+                query: inboundMessage.content,
+                topK: 6
+            }));
+        }
         const preRisk = safetyService.checkRisk({
             userMessage: inboundMessage.content,
             ragHitCount: ragContext.length
         });
-        // 当前消息会在 userContent 中单独传入，这里排除它，避免 OpenClaw 同时看到两份相同问题。
-        const history = await messageService.getRecentHistory(conversation.id, 12, inboundMessage.id);
+        // 当前消息会在 userContent 中单独传入，history 已在订单路由前读取并排除了当前消息。
         let reply = '这个我帮您转人工确认一下。';
         let raw = {};
         // 命中高风险问题时不调用模型生成承诺类话术，直接转人工。

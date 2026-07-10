@@ -1,3 +1,9 @@
+<!-- 文件索引注释（不影响 Markdown 渲染）
+  @file samples/kb/douyin-after-sales.md
+  @module 后台、文档、样例
+  @description 抖音售后规则测试样例。
+  @see 联动关注：高风险场景仍应转人工。
+-->
 # 抖音团购售后规则
 
 抖音团购套餐未核销且未过期时，用户可以在抖音订单页按平台规则申请退款。

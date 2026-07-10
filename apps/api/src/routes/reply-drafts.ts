@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/routes/reply-drafts.ts
+ * @module API Adapter 与路由
+ * @description 回复草稿查询、批准、拒绝和 sent 标记。
+ * @see 联动关注：Extension Gateway 与人工审核。
+ */
 import { prisma } from '../lib/prisma.js';
 import { SendService } from '../services/send.service.js';
 export async function replyDraftRoutes(app) {

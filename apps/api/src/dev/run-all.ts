@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file apps/api/src/dev/run-all.ts
+ * @module API 入口与基础设施
+ * @description 开发编排：Docker、OpenClaw、API、RAG、Mock 站点和专用 Chrome。
+ * @see 联动关注：端口、进程清理、README 启动说明。
+ */
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

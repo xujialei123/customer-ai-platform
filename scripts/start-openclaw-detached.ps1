@@ -1,3 +1,7 @@
+# @file scripts/start-openclaw-detached.ps1
+# @module 数据库、共享包与交付
+# @description 后台启动便携 OpenClaw 网关。
+# @see 联动关注：OPENCLAW_PORTABLE_ROOT 路径。
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
