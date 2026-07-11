@@ -45,7 +45,7 @@ const fileGroups = [
     ['apps/api/src/routes/conversations.ts', '查询会话和消息历史。', 'ConversationService。'],
     ['apps/api/src/routes/knowledge.ts', '旧知识接口兼容层。', '新知识优先使用 8787。'],
     ['apps/api/src/routes/orders.ts', '订单查询测试接口。', 'OrderService。'],
-    ['apps/api/src/routes/reply-drafts.ts', '草稿查询、批准、拒绝和 sent 标记。', 'Extension Gateway 与人工审核。'],
+    ['apps/api/src/routes/reply-drafts.ts', '草稿查询、白名单兜底、批准、拒绝和 sent 标记。', 'Extension Gateway 与人工审核。'],
     ['apps/api/src/routes/rpa.ts', 'RPA inbound/outbound、配置和扩展状态。', 'MessageService、插件。'],
     ['apps/api/src/routes/webhooks.wecom.ts', '企微 URL 校验和回调入口。', 'Crypto、Adapter、Client。']
   ]],
@@ -63,10 +63,12 @@ const fileGroups = [
     ['apps/api/src/services/wecom-client.service.ts', '企微 Token 和官方发送请求。', '企微环境变量。'],
     ['apps/api/src/services/wecom-crypto.service.ts', '企微签名验证和消息加解密。', 'Token/AES Key。'],
     ['apps/api/src/utils/chunk-text.ts', '旧知识文本切片。', '不要用于替代知识卡片。'],
+    ['apps/api/src/utils/terminal-log.ts', '终端彩色业务日志：检索、草稿、推送、发送按钮点击结果。', 'Windows 终端需支持 ANSI；仅开发排查用。'],
     ['apps/api/src/workers/reply.worker.ts', '消费消息队列；先做多轮订单路由，非订单才执行 RAG，再调用 OpenClaw、风控和生成草稿。', '回复主链路排障入口。']
   ]],
   ['RPA 与 Chrome 插件', [
     ['apps/api/src/rpa/extension-gateway.ts', '本地 WebSocket、会话注册、messageId 草稿关联和状态。', 'background.js 协议。'],
+    ['apps/api/src/rpa/customer-allowlist.ts', '美团真实灰度客户白名单判断。', 'env、rpa.ts 和插件同步。'],
     ['apps/api/src/rpa/mock-chat-server.ts', '3100 多会话 Mock、随机消息和页面发送。', 'content.js 选择器。'],
     ['apps/api/src/rpa/selector-config.ts', '读写平台 RPA 选择器。', 'RPA 配置路由。'],
     ['apps/api/src/rpa/browser.ts', 'Playwright persistent context 兼容启动器。', '非默认模式。'],
@@ -77,7 +79,7 @@ const fileGroups = [
     ['apps/api/src/rpa/meituan-real.watcher.ts', '美团真实页 Playwright 兼容入口。', '真实账号灰度。'],
     ['extensions/customer-ai-rpa/manifest.json', 'MV3 权限、域名和脚本声明。', '版本与权限。'],
     ['extensions/customer-ai-rpa/background.js', 'WebSocket、设置迁移、会话路由和重连。', 'Gateway 协议。'],
-    ['extensions/customer-ai-rpa/content.js', 'DOM/Shadow DOM、未读队列、切换、回填和发送。', '平台 DOM 与串话防护。'],
+    ['extensions/customer-ai-rpa/content.js', 'DOM/Shadow DOM、未读队列、白名单会话切换、回填和发送。', '平台 DOM 与串话防护。'],
     ['extensions/customer-ai-rpa/popup.html', '扩展设置面板结构。', 'popup.js 字段。'],
     ['extensions/customer-ai-rpa/popup.js', '配置持久化、状态和 AI 选择器识别。', 'Chrome storage。'],
     ['extensions/customer-ai-rpa/popup.css', '扩展弹窗样式。', '窄屏与溢出。'],

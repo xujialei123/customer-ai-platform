@@ -1,6 +1,9 @@
 // @ts-nocheck
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import mammoth from 'mammoth';
+import { PDFParse } from 'pdf-parse';
+import * as XLSX from 'xlsx';
 export function getFileType(fileName) {
     return fileName.split('.').pop()?.toLowerCase() ?? '';
 }
@@ -18,13 +21,28 @@ export async function parseKnowledgeFile(filePath, fileName) {
         return parseCsv(await readFile(filePath, 'utf-8'));
     }
     if (fileType === 'pdf') {
-        throw new Error('当前 PDF 解析依赖未启用；如果是扫描件还需要 OCR。请先用 txt/md 验证流程。');
+        const parser = new PDFParse({ data: await readFile(filePath) });
+        try {
+            const result = await parser.getText();
+            if (!result.text.trim())
+                throw new Error('PDF 未提取到文本；扫描件需要先经过 OCR Adapter 处理');
+            return result.pages.map((page) => ({ content: page.text, page: page.num, metadata: { sourceType: 'pdf' } }));
+        }
+        finally {
+            await parser.destroy();
+        }
     }
     if (fileType === 'docx') {
-        throw new Error('当前 DOCX 解析依赖未启用。请安装 mammoth 后接入解析器，或先上传 md/txt。');
+        const result = await mammoth.extractRawText({ path: filePath });
+        return [{ content: result.value, page: 1, metadata: { sourceType: 'docx', warnings: result.messages.map((item) => item.message) } }];
     }
     if (fileType === 'xlsx') {
-        throw new Error('当前 XLSX 解析依赖未启用。请安装 xlsx 后接入解析器，或先另存为 csv。');
+        const workbook = XLSX.read(await readFile(filePath), { type: 'buffer' });
+        return workbook.SheetNames.map((sheetName, index) => ({
+            content: XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName], { blankrows: false }),
+            page: index + 1,
+            metadata: { sourceType: 'xlsx', sheetName }
+        })).filter((part) => part.content.trim());
     }
     throw new Error(`不支持的文件类型：${fileType}`);
 }

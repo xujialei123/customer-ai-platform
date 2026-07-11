@@ -6,7 +6,7 @@
  */
 const DEFAULT_SETTINGS = {
   // 默认只监听和回填；自动点击发送必须由操作员明确开启，并持久化到 Chrome 扩展存储。
-  settingsVersion: 3,
+  settingsVersion: 6,
   enabled: true,
   wsUrl: 'ws://127.0.0.1:3001/rpa/extension/ws',
   platform: 'meituan',
@@ -20,10 +20,11 @@ const DEFAULT_SETTINGS = {
   sessionRootSelector: '.user-center[lx-mv]',
   customerNameSelector: '.userinfo-name-show',
   trackingAttribute: 'lx-mv',
-  conversationItemSelector: '.chat-list-item',
-  conversationUnreadSelector: '.mtd-badge',
+  conversationItemSelector: '.chat-list-item-wrapper,.chat-list-item,.virtual-list-item',
+  conversationUnreadSelector: '.mtd-badge-text.mtd-badge-position',
   autoSwitchConversations: false,
-  autoSend: false
+  autoSend: false,
+  allowedCustomerIds: ''
 };
 
 let socket;
@@ -42,8 +43,21 @@ async function getSettings() {
       settingsVersion: DEFAULT_SETTINGS.settingsVersion,
       messageItemSelector: saved.messageItemSelector === '[data-rpa-message-item]' ? DEFAULT_SETTINGS.messageItemSelector : saved.messageItemSelector,
       messageTextSelector: saved.messageTextSelector === '[data-rpa-message-text]' ? DEFAULT_SETTINGS.messageTextSelector : saved.messageTextSelector,
-      replyInputSelector: saved.replyInputSelector === 'pre[contenteditable="plaintext-only"]' ? DEFAULT_SETTINGS.replyInputSelector : saved.replyInputSelector,
-      sendButtonSelector: saved.sendButtonSelector || DEFAULT_SETTINGS.sendButtonSelector
+      replyInputSelector: saved.replyInputSelector === 'pre[contenteditable="plaintext-only"]'
+        ? DEFAULT_SETTINGS.replyInputSelector
+        : saved.replyInputSelector,
+      // 旧版占位选择器在页面上不存在，会导致“能读消息但点不了发送”；升级时强制换成经营宝真实按钮。
+      sendButtonSelector: !saved.sendButtonSelector
+        || saved.sendButtonSelector.includes('not-configured')
+        || saved.sendButtonSelector === '[data-rpa-send-button]'
+        ? DEFAULT_SETTINGS.sendButtonSelector
+        : saved.sendButtonSelector,
+      conversationItemSelector: !saved.conversationItemSelector || saved.conversationItemSelector === '.chat-list-item'
+        ? DEFAULT_SETTINGS.conversationItemSelector
+        : saved.conversationItemSelector,
+      conversationUnreadSelector: !saved.conversationUnreadSelector || saved.conversationUnreadSelector === '.mtd-badge'
+        ? DEFAULT_SETTINGS.conversationUnreadSelector
+        : saved.conversationUnreadSelector
     };
     await chrome.storage.local.set(migrated);
     return migrated;
@@ -87,6 +101,10 @@ async function connect() {
           payload: message.payload
         }, { frameId: target.frameId }).catch(() => undefined);
     }
+    if (message.type === 'connected' && message.payload?.meituanAllowedCustomers) {
+      // 服务端是最终白名单来源；扩展只做前置过滤，真正安全边界仍在 API。
+      chrome.storage.local.set({ allowedCustomerIds: message.payload.meituanAllowedCustomers.join(',') });
+    }
   });
   socket.addEventListener('close', () => {
     setState('disconnected');
@@ -120,12 +138,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       chrome.storage.local.set({ shopId: message.payload.shopId, detectedShopId: message.payload.shopId });
     send({ type: 'hello', payload: message.payload });
   }
+  if (message.type === 'clearFrameSession') {
+    // 当前 frame 已切到非白名单客户时，清理旧会话映射，避免状态页和草稿投递仍指向上一个测试客户。
+    const frameKey = `${sender.tab?.id ?? 'unknown'}:${sender.frameId ?? 0}`;
+    const previousKey = frameSessions.get(frameKey);
+    if (previousKey) {
+      const previous = sessionTargets.get(previousKey);
+      if (previous)
+        send({ type: 'remove_session', payload: previous.session });
+      sessionTargets.delete(previousKey);
+      frameSessions.delete(frameKey);
+    }
+  }
   if (message.type === 'inbound')
     send({ type: 'inbound', requestId: message.requestId, payload: message.payload });
   if (message.type === 'outbound')
     send({ type: 'outbound', requestId: message.requestId, payload: message.payload });
   if (message.type === 'diagnostics')
     send({ type: 'diagnostics', payload: message.payload });
+  if (message.type === 'draft_send_result')
+    send({ type: 'draft_send_result', payload: message.payload });
   if (message.type === 'settingsChanged') {
     socket?.close();
     void connect();

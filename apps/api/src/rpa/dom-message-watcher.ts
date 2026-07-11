@@ -118,10 +118,66 @@ async function sendDraftByBrowser(page, config, draft) {
     if (draft.riskLevel === 'high') {
         return false;
     }
-    // mock sender 也走真实浏览器操作：定位输入框、填入回复、点击发送。
-    // 后续接真实抖音/美团时，只需要把 senderSelectors 换成真实页面的输入框和发送按钮。
-    await page.locator(config.senderSelectors.replyInput).fill(draft.content);
-    await page.locator(config.senderSelectors.sendButton).click();
+    const replyInput = config.senderSelectors.replyInput;
+    const sendButton = config.senderSelectors.sendButton;
+    // 占位选择器表示尚未完成现场确认；继续 click 只会超时，不如明确跳过并打日志。
+    if (!sendButton || String(sendButton).includes('not-configured')) {
+        console.warn(`${config.name} 发送按钮选择器未配置，已跳过自动发送`);
+        return false;
+    }
+    // 经营宝输入框是 contenteditable，不能只靠 Playwright fill；
+    // 发送按钮也常绑定 mousedown/mouseup 链，单纯 click 可能点了但页面不发消息。
+    const fillPayload = JSON.stringify({ replyInput, content: draft.content });
+    const filled = await page.evaluate(`(() => {
+    const inputCfg = ${fillPayload};
+    const input = document.querySelector(inputCfg.replyInput);
+    if (!input) return { ok: false, stage: 'input', selector: inputCfg.replyInput };
+
+    input.focus();
+    const content = String(inputCfg.content ?? '');
+    if (input.isContentEditable || input.getAttribute('contenteditable') != null) {
+      input.textContent = content;
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(input);
+      range.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      for (const event of [
+        new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: content }),
+        new InputEvent('input', { bubbles: true, inputType: 'insertText', data: content }),
+        new Event('change', { bubbles: true }),
+        new KeyboardEvent('keyup', { bubbles: true, key: 'Process', code: 'Process' })
+      ]) input.dispatchEvent(event);
+      document.dispatchEvent(new Event('selectionchange', { bubbles: true }));
+    } else if ('value' in input) {
+      input.value = content;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      return { ok: false, stage: 'input-type', selector: inputCfg.replyInput };
+    }
+    return { ok: true };
+  })()`);
+    if (!filled?.ok) {
+        throw new Error(`${config.name} 自动发送失败：找不到输入框（${filled?.selector ?? replyInput}）`);
+    }
+    // 给页面内部状态一点时间启用发送按钮，与 Chrome 插件行为对齐。
+    await page.waitForTimeout(300);
+    const clickPayload = JSON.stringify({ sendButton });
+    const clicked = await page.evaluate(`(() => {
+    const inputCfg = ${clickPayload};
+    const button = document.querySelector(inputCfg.sendButton);
+    if (!button) return { ok: false, stage: 'button', selector: inputCfg.sendButton };
+    const view = document.defaultView;
+    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view }));
+    button.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view }));
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view }));
+    return { ok: true };
+  })()`);
+    if (!clicked?.ok) {
+        throw new Error(`${config.name} 自动发送失败：找不到发送按钮（${clicked?.selector ?? sendButton}）`);
+    }
     return true;
 }
 async function renderRagReplyToMockPage(page, input) {

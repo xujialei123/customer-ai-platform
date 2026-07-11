@@ -6,6 +6,9 @@
  * @see 联动关注：background.js 通信协议。
  */
 import { createHash } from 'node:crypto';
+import { env } from '../config/env.js';
+import { buildRpaAllowlistStatus, isRpaCustomerAllowed } from './customer-allowlist.js';
+import { terminalLog } from '../utils/terminal-log.js';
 
 const clients = new Set();
 
@@ -70,6 +73,11 @@ async function readDrafts(client, apiBaseUrl) {
     client.pollingDrafts = true;
     try {
     for (const session of client.sessions.values()) {
+        if (!isRpaCustomerAllowed(session)) {
+            // 白名单变更或旧 content script 重连时，旧会话不能继续轮询草稿，防止正式页误回非测试客户。
+            client.sessions.delete(`${session.platform}:${session.conversationId}`);
+            continue;
+        }
         const url = new URL('/reply-drafts/recent', apiBaseUrl);
         url.searchParams.set('platform', session.platform);
         url.searchParams.set('shopId', session.shopId);
@@ -79,35 +87,88 @@ async function readDrafts(client, apiBaseUrl) {
         if (!response.ok)
             continue;
         const result = await response.json();
-        const unsentDrafts = (result.drafts ?? []).filter((draft) => ['pending', 'approved'].includes(draft.status)
-            && !client.sentDrafts.has(draft.id)
-            // 自动模式只接收该浏览器连接实际提交过的消息草稿，历史 backlog 不能重新灌进当前输入框。
-            && (!client.autoSendEnabled || client.expectedMessageIds.has(draft.messageId)));
-        // 自动发送每轮最多处理当前会话的一条新草稿，避免历史积压或并发轮询造成连续发送。
-        const draftsToPush = client.autoSendEnabled ? unsentDrafts.slice(-1) : unsentDrafts;
-        for (const draft of draftsToPush) {
-            if (draft.status === 'sent' || client.sentDrafts.has(draft.id))
+        const unsentDrafts = (result.drafts ?? []).filter((draft) => ['pending', 'approved'].includes(draft.status));
+        // 等扩展同步完 autoSend 开关再推草稿，避免首轮轮询在 client_settings 到达前把草稿按“仅回填”烧掉。
+        if (!client.settingsReady)
+            continue;
+        // 已确认发送过的问题才跳过；不要仅因页面回扫到旧气泡就 reject 新草稿。
+        const unrepliedDrafts = unsentDrafts.filter((draft) => draft.alreadyReplied !== true);
+        for (const draft of unsentDrafts) {
+            if (draft.alreadyReplied === true && !client.draftPushState.has(draft.id)) {
+                client.draftPushState.set(draft.id, { allowAutoSend: false, skipped: true, reason: 'already_replied' });
+                terminalLog('warn', {
+                    platform: session.platform,
+                    customer: session.customerName || session.customerId || session.conversationId,
+                    denyReason: 'already_replied',
+                    userMessage: draft.userMessage,
+                    content: draft.content
+                });
+            }
+        }
+        // 优先推“本轮刚入库消息”对应草稿；否则推未回复问题里最新一条 pending。
+        // 旧问题若已 sent / 内容已出现在 outbound，会被 alreadyReplied 过滤掉。
+        const matchedDrafts = unrepliedDrafts.filter((draft) => client.expectedMessageIds.has(draft.messageId));
+        const candidates = matchedDrafts.length > 0
+            ? matchedDrafts
+            : unrepliedDrafts.slice(-1);
+        // 自动发送每轮最多处理一条，避免连点。
+        const draftsToPush = client.autoSendEnabled ? candidates.slice(-1) : candidates;
+        for (const draft of unrepliedDrafts) {
+            if (candidates.some((item) => item.id === draft.id))
                 continue;
-            client.sentDrafts.add(draft.id);
-            client.expectedMessageIds.delete(draft.messageId);
-            const draftCreatedAt = new Date(draft.createdAt).getTime();
-            const autoSendCutoff = Math.max(client.autoSendEnabledAt, client.connectedAt);
+            if (!client.draftPushState.has(draft.id))
+                client.draftPushState.set(draft.id, { allowAutoSend: false, skipped: true, reason: 'not_latest_unreplied' });
+        }
+        for (const draft of draftsToPush) {
+            if (draft.status === 'sent')
+                continue;
+            const previousPush = client.draftPushState.get(draft.id);
+            if (previousPush?.allowAutoSend || previousPush?.skipped)
+                continue;
+            const isExpectedMessage = client.expectedMessageIds.has(draft.messageId);
             const cooldownPassed = Date.now() - client.lastAutoSendAt >= 8000;
+            const allowWhitelistedRpaAutoSend = session.platform === 'meituan' && isRpaCustomerAllowed(session);
             const allowAutoSend = Boolean(client.autoSendEnabled)
+                && env.RPA_AUTO_SEND_ENABLED
                 && draft.riskLevel === 'low'
-                && draftCreatedAt >= autoSendCutoff
-                && cooldownPassed;
+                && cooldownPassed
+                && (isExpectedMessage || allowWhitelistedRpaAutoSend);
+            if (previousPush && !allowAutoSend)
+                continue;
+            client.draftPushState.set(draft.id, { allowAutoSend });
+            client.expectedMessageIds.delete(draft.messageId);
             if (allowAutoSend)
                 client.lastAutoSendAt = Date.now();
+            const denyReason = allowAutoSend
+                ? ''
+                : !client.autoSendEnabled
+                    ? 'extension_auto_send_off'
+                    : !env.RPA_AUTO_SEND_ENABLED
+                        ? 'server_rpa_auto_send_off'
+                        : draft.riskLevel !== 'low'
+                            ? `risk_${draft.riskLevel}`
+                            : !cooldownPassed
+                                ? 'cooldown'
+                                : !(isExpectedMessage || allowWhitelistedRpaAutoSend)
+                                    ? 'session_not_authorized'
+                                    : 'unknown';
             sendFrame(client.socket, {
                 type: 'draft',
                 session,
                 payload: {
                     ...draft,
-                    // Chrome 扩展模式以操作员在扩展中的显式开关为授权源；高风险和会话校验仍在后续保留。
-                    // 历史 pending 草稿只能人工处理；自动发送只接受本次连接中明确开启开关后新生成的草稿。
-                    allowAutoSend
+                    allowAutoSend,
+                    denyReason
                 }
+            });
+            terminalLog(allowAutoSend ? 'push' : 'fill_only', {
+                platform: session.platform,
+                customer: session.customerName || session.customerId || session.conversationId,
+                riskLevel: draft.riskLevel,
+                allowAutoSend,
+                denyReason: denyReason || undefined,
+                userMessage: draft.userMessage,
+                content: draft.content
             });
         }
     }
@@ -128,9 +189,13 @@ async function handleMessage(client, apiBaseUrl, raw) {
         return;
     }
     if (message.type === 'hello') {
+        if (!isRpaCustomerAllowed(message.payload)) {
+            sendFrame(client.socket, { type: 'ignored_session', payload: { reason: 'customer_not_allowed', session: message.payload } });
+            return;
+        }
         const sessionKey = `${message.payload.platform}:${message.payload.conversationId}`;
         client.sessions.set(sessionKey, message.payload);
-        sendFrame(client.socket, { type: 'connected', payload: { clientId: client.id } });
+        sendFrame(client.socket, { type: 'connected', payload: { clientId: client.id, ...buildRpaAllowlistStatus() } });
         return;
     }
     if (message.type === 'reset_sessions') {
@@ -153,6 +218,7 @@ async function handleMessage(client, apiBaseUrl, raw) {
         if (nextEnabled && !client.autoSendEnabled)
             client.autoSendEnabledAt = Date.now();
         client.autoSendEnabled = nextEnabled;
+        client.settingsReady = true;
         return;
     }
     if (message.type === 'diagnostics') {
@@ -160,8 +226,32 @@ async function handleMessage(client, apiBaseUrl, raw) {
         client.diagnostics.set(message.payload.pageUrl, message.payload);
         return;
     }
+    if (message.type === 'draft_send_result') {
+        // 插件回传是否点到发送按钮；正文已在推送草稿时打印，这里只记点击结果。
+        const payload = message.payload ?? {};
+        terminalLog(payload.clicked ? 'click_ok' : (payload.filledOnly ? 'fill_only' : 'click_fail'), {
+            platform: payload.platform,
+            customer: payload.customerName || payload.customerId || payload.conversationId,
+            riskLevel: payload.riskLevel,
+            allowAutoSend: payload.allowAutoSend,
+            denyReason: payload.denyReason,
+            clicked: payload.clicked,
+            method: payload.method,
+            content: payload.content
+        });
+        return;
+    }
     if (!['inbound', 'outbound'].includes(message.type))
         return;
+    if (!isRpaCustomerAllowed(message.payload)) {
+        // 线上灰度时非白名单客户直接丢弃，不入库、不排队、不推草稿，防止真实经营宝误回。
+        sendFrame(client.socket, {
+            type: `${message.type}_ack`,
+            requestId: message.requestId,
+            payload: { ok: true, ignored: true, reason: 'customer_not_allowed' }
+        });
+        return;
+    }
     if (message.type === 'inbound' && message.payload?.id)
         client.expectedMessageIds.add(message.payload.id);
     const endpoint = message.type === 'outbound' ? '/rpa/outbound' : '/rpa/inbound';
@@ -218,13 +308,15 @@ export function registerRpaExtensionGateway(server, apiPort) {
             diagnostics: new Map(),
             autoSendEnabled: false,
             autoSendEnabledAt: Number.POSITIVE_INFINITY,
+            settingsReady: false,
             connectedAt: Date.now(),
             pollingDrafts: false,
             lastAutoSendAt: 0,
-            sentDrafts: new Set(),
+            draftPushState: new Map(),
             expectedMessageIds: new Set()
         };
         clients.add(client);
+        sendFrame(socket, { type: 'connected', payload: { clientId: client.id, ...buildRpaAllowlistStatus() } });
         socket.on('data', (chunk) => parseFrames(client, chunk, (raw) => {
             void handleMessage(client, apiBaseUrl, raw).catch((error) => {
                 sendFrame(socket, { type: 'error', error: error instanceof Error ? error.message : String(error) });
@@ -246,6 +338,9 @@ export function getRpaExtensionStatus() {
         connectedClients: clients.size,
         sessions: [...clients].flatMap((client) => [...client.sessions.values()]),
         autoSendClients: [...clients].filter((client) => client.autoSendEnabled).length,
+        // 方便对照：弹窗开了自动发送但这里是 false 时，说明 API 进程没读到最新 .env，需要重启 pnpm dev。
+        rpaAutoSendEnabled: env.RPA_AUTO_SEND_ENABLED,
+        ...buildRpaAllowlistStatus(),
         diagnostics: [...clients].flatMap((client) => [...client.diagnostics.values()])
     };
 }

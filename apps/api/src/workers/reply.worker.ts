@@ -16,6 +16,7 @@ import { OrderService } from '../services/order.service.js';
 import { RagService } from '../services/rag.service.js';
 import { SafetyService } from '../services/safety.service.js';
 import { SendService } from '../services/send.service.js';
+import { terminalLog } from '../utils/terminal-log.js';
 const ragService = new RagService();
 const messageService = new MessageService();
 const openClawClient = new OpenClawClient();
@@ -34,6 +35,9 @@ export function startReplyWorker() {
         if (!inboundMessage || !inboundMessage.content)
             return;
         const conversation = inboundMessage.conversation;
+        const startedAt = Date.now();
+        let ragMs = 0;
+        let openclawMs = 0;
         // 必须先恢复多轮上下文并执行订单路由；订单号属于工具参数，不能先送到知识库检索。
         const history = await messageService.getRecentHistory(conversation.id, 12, inboundMessage.id);
         const awaitingOrderIdentifier = orderService.isAwaitingOrderIdentifier(history);
@@ -77,12 +81,14 @@ export function startReplyWorker() {
         }
         if (!routedToOrderSystem) {
             // 只有非订单消息才进入 Hybrid RAG，避免订单号被当成普通知识问题。
+            const ragStarted = Date.now();
             ragContext.push(...await ragService.search({
                 platform: conversation.platform,
                 shopId: conversation.shopId,
                 query: inboundMessage.content,
                 topK: 6
             }));
+            ragMs = Date.now() - ragStarted;
         }
         const preRisk = safetyService.checkRisk({
             userMessage: inboundMessage.content,
@@ -95,11 +101,14 @@ export function startReplyWorker() {
         // 这样可以减少退款、投诉、赔偿等场景下模型越权回复的概率。
         if (preRisk.riskLevel !== 'high') {
             try {
+                const openclawStarted = Date.now();
                 const result = await openClawClient.generateReply({
                     message: inboundMessage.content,
-                    conversationHistory: history,
+                    // 客服回复只要近几轮即可；过长历史会显著拖慢本地 OpenClaw。
+                    conversationHistory: history.slice(-6),
                     ragContext
                 });
+                openclawMs = Date.now() - openclawStarted;
                 reply = result.content;
                 raw = result.raw;
             }
@@ -114,7 +123,18 @@ export function startReplyWorker() {
             aiReply: reply,
             ragHitCount: ragContext.length
         });
-        const shouldAutoSend = env.AUTO_REPLY_ENABLED && finalRisk.allowAutoSend;
+        terminalLog('rag', {
+            platform: conversation.platform,
+            customer: conversation.customerName || conversation.customerId,
+            ragHits: ragContext.length,
+            userMessage: inboundMessage.content,
+            ragPreview: ragContext.slice(0, 3).map((item) => item.content ?? item.id ?? String(item)),
+            method: `rag=${ragMs}ms openclaw=${openclawMs}ms total=${Date.now() - startedAt}ms`
+        });
+        // 抖音/美团真实发送只能由 Chrome 插件或 Playwright 在浏览器里完成。
+        // Adapter.sendMessage 只是占位失败，这里若走 SendService 会把草稿 reason 写成“自动发送未开启”，误导排查。
+        const isBrowserRpaPlatform = conversation.platform === 'douyin' || conversation.platform === 'meituan';
+        const shouldAutoSend = env.AUTO_REPLY_ENABLED && finalRisk.allowAutoSend && !isBrowserRpaPlatform;
         if (shouldAutoSend) {
             // 只有全局自动回复开启且最终风控允许时才进入发送出口。
             // 抖音/美团的 SendService 还会额外检查 RPA_AUTO_SEND_ENABLED，默认不会真实发送。
@@ -138,6 +158,13 @@ export function startReplyWorker() {
                         raw: { sendResult, openclaw: raw }
                     }
                 });
+                terminalLog('click_ok', {
+                    platform: conversation.platform,
+                    customer: conversation.customerName || conversation.customerId,
+                    riskLevel: finalRisk.riskLevel,
+                    content: reply,
+                    method: 'adapter-send'
+                });
             }
             else {
                 // 自动发送失败时不要伪造成已发消息，转成草稿让人工确认。
@@ -153,10 +180,23 @@ export function startReplyWorker() {
                         ragContext: ragContext
                     }
                 });
+                terminalLog('draft', {
+                    platform: conversation.platform,
+                    customer: conversation.customerName || conversation.customerId,
+                    riskLevel: finalRisk.riskLevel,
+                    userMessage: inboundMessage.content,
+                    content: reply,
+                    denyReason: sendResult.error ?? finalRisk.reason
+                });
             }
         }
         else {
-            // 默认路径：生成回复草稿，由人工审核。
+            // 默认路径：生成回复草稿。
+            // 美团/抖音由插件根据 RPA_AUTO_SEND_ENABLED + 弹窗开关决定是否点击发送。
+            const draftReason = finalRisk.reason
+                ?? (isBrowserRpaPlatform
+                    ? (env.RPA_AUTO_SEND_ENABLED ? '等待浏览器 RPA/插件发送' : 'RPA 自动发送未开启，仅回填待确认')
+                    : undefined);
             await prisma.replyDraft.create({
                 data: {
                     id: nanoid(),
@@ -165,9 +205,18 @@ export function startReplyWorker() {
                     content: reply,
                     status: 'pending',
                     riskLevel: finalRisk.riskLevel,
-                    reason: finalRisk.reason,
+                    reason: draftReason,
                     ragContext: ragContext
                 }
+            });
+            terminalLog('draft', {
+                platform: conversation.platform,
+                customer: conversation.customerName || conversation.customerId,
+                riskLevel: finalRisk.riskLevel,
+                ragHits: ragContext.length,
+                userMessage: inboundMessage.content,
+                content: reply,
+                denyReason: draftReason
             });
         }
     }, { connection: redisConnection });

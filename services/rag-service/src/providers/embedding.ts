@@ -43,19 +43,20 @@ export class OpenAICompatibleEmbeddingProvider {
         return (await this.embedTexts([text]))[0] ?? [];
     }
     async embedTexts(texts) {
-        // 控制并发可以避免批量上传时瞬间触发供应商限流，同时保持返回顺序与 chunk 一致。
+        // 检索链路通常只有 1～2 条 query，一次 HTTP 批量编码即可。
+        // 知识入库可能有上百 chunk，按批切分，避免单请求体过大被网关拒绝。
         const clippedTexts = texts.map((text) => text.slice(0, 8000));
+        if (clippedTexts.length === 0)
+            return [];
+        if (clippedTexts.length <= 8)
+            return retry(() => this.requestEmbeddings(clippedTexts));
         const results = [];
-        const concurrency = 4;
-        for (let start = 0; start < clippedTexts.length; start += concurrency) {
-            const batch = clippedTexts.slice(start, start + concurrency);
-            const vectors = await Promise.all(batch.map((text) => retry(() => this.requestEmbedding(text))));
-            results.push(...vectors);
+        for (let start = 0; start < clippedTexts.length; start += 8) {
+            results.push(...await retry(() => this.requestEmbeddings(clippedTexts.slice(start, start + 8))));
         }
         return results;
     }
-    async requestEmbedding(text) {
-        // 每个 chunk 单独请求，失败信息保留 HTTP 状态，方便上传页面显示真实解析错误。
+    async requestEmbeddings(texts) {
         const response = await fetch(`${env.EMBEDDING_BASE_URL}/embeddings`, {
             method: 'POST',
             headers: {
@@ -64,17 +65,19 @@ export class OpenAICompatibleEmbeddingProvider {
             },
             body: JSON.stringify({
                 model: env.EMBEDDING_MODEL,
-                input: text,
+                input: texts.length === 1 ? texts[0] : texts,
                 // text-embedding-v4 默认返回 1024 维；必须显式对齐 pgvector 表的 VECTOR_DIM。
                 dimensions: env.VECTOR_DIM,
                 encoding_format: 'float'
-            })
+            }),
+            signal: AbortSignal.timeout(15000)
         });
         if (!response.ok) {
             throw new Error(`Embedding 请求失败：${response.status} ${await response.text()}`);
         }
         const json = await response.json();
-        return json.data?.[0]?.embedding ?? [];
+        const rows = Array.isArray(json.data) ? [...json.data].sort((a, b) => Number(a.index ?? 0) - Number(b.index ?? 0)) : [];
+        return texts.map((_, index) => rows[index]?.embedding ?? []);
     }
 }
 export function createEmbeddingProvider() {

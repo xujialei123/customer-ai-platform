@@ -186,6 +186,8 @@ function selectorShape(element) {
 function collectDiagnostics(settings, targetDocument) {
   // 诊断数据用于选择器失效排查，属性值按白名单采集并对 lx-mv 做脱敏。
   const classCounts = new Map();
+  const conversationItems = conversationItemsOf(targetDocument, settings);
+  const unreadConversationItems = conversationItems.filter((item) => unreadCountOf(item, settings) > 0);
   for (const element of queryAllDeep(targetDocument, 'div,li,article,section')) {
     const text = element.textContent?.trim() ?? '';
     const rect = element.getBoundingClientRect();
@@ -205,6 +207,19 @@ function collectDiagnostics(settings, targetDocument) {
       replyInputs: settings.replyInputSelector ? queryAllDeep(targetDocument, settings.replyInputSelector).length : 0,
       sendButtons: settings.sendButtonSelector ? queryAllDeep(targetDocument, settings.sendButtonSelector).length : 0
     },
+    conversationCounts: {
+      // 这里不上传客户正文，只统计左侧列表是否可识别、是否存在未读、是否命中白名单，用来排查自动切换失败。
+      items: conversationItems.length,
+      unread: unreadConversationItems.length,
+      allowedUnread: unreadConversationItems.filter((item) => isAllowedConversation(settings, null, item)).length
+    },
+    settingsState: {
+      // 只暴露布尔状态，避免把白名单客户 ID 写进诊断日志。
+      enabled: settings.enabled === true,
+      autoSwitchConversations: settings.autoSwitchConversations === true,
+      autoSend: settings.autoSend === true,
+      allowedCustomerIdsPresent: allowedCustomersOf(settings).length > 0
+    },
     editables: queryAllDeep(targetDocument, '[contenteditable="true"],[contenteditable="plaintext-only"],textarea').slice(0, 10).map(selectorShape),
     sendControls: queryAllDeep(targetDocument, 'button,[role="button"]')
       .filter((element) => /发送/.test(element.textContent ?? '')).slice(0, 10).map(selectorShape),
@@ -214,8 +229,13 @@ function collectDiagnostics(settings, targetDocument) {
 
 function unreadCountOf(item, settings) {
   // 平台角标可能只显示红点，也可能显示数字；红点按一条未读处理，避免整条会话永远遗漏。
-  const badge = item.querySelector(settings.conversationUnreadSelector || '.mtd-badge');
-  if (!badge || badge.hidden || getComputedStyle(badge).display === 'none')
+  const selector = settings.conversationUnreadSelector || '.mtd-badge-text.mtd-badge-position';
+  const badge = item.querySelector(selector);
+  if (!badge || badge.hidden)
+    return 0;
+  const style = getComputedStyle(badge);
+  const rect = badge.getBoundingClientRect();
+  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0)
     return 0;
   const explicitCount = Number(item.getAttribute('data-unread-count'));
   if (Number.isFinite(explicitCount) && explicitCount > 0)
@@ -232,12 +252,173 @@ function conversationIdOf(item) {
     || '';
 }
 
+function conversationItemsOf(targetDocument, settings) {
+  // 真实经营宝左侧列表会在不同版本里使用 wrapper、item 或虚拟列表节点，默认同时兼容这些稳定 class。
+  const selector = settings.conversationItemSelector || '.chat-list-item-wrapper,.chat-list-item,.virtual-list-item';
+  return queryAllDeep(targetDocument, selector)
+    .filter((item, index, all) => item.textContent?.trim() && all.findIndex((candidate) => candidate === item || candidate.contains(item)) === index);
+}
+
+function clickableConversationTarget(item) {
+  // 优先点击真正承载会话的节点；如果命中的是外层虚拟列表，则退回内部 item，保持与人工点击一致。
+  return item.matches('.chat-list-item,.chat-list-item-wrapper')
+    ? item
+    : item.querySelector('.chat-list-item,.chat-list-item-wrapper') || item;
+}
+
+function allowedCustomersOf(settings) {
+  return String(settings.allowedCustomerIds || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isAllowedConversation(settings, session, conversationItem) {
+  const allowedCustomers = allowedCustomersOf(settings);
+  if (!allowedCustomers.length)
+    return true;
+  const candidates = [
+    session?.conversationId,
+    session?.customerId,
+    session?.customerName,
+    conversationItem ? conversationIdOf(conversationItem) : '',
+    conversationItem?.textContent?.trim()
+  ].filter(Boolean).map(String);
+  // 真实平台灰度只处理指定测试用户；左侧列表无法稳定读 userId 时允许文本包含测试 ID。
+  return allowedCustomers.some((allowed) => candidates.some((candidate) => candidate === allowed || candidate.includes(allowed)));
+}
+
 function setProcessingStatus(text) {
   // Mock 页面提供状态占位；真实平台没有该节点时静默跳过，不向经营宝 DOM 注入额外 UI。
   for (const targetDocument of getAccessibleDocuments()) {
     const status = queryOneDeep(targetDocument, '[data-rpa-processing-status]');
     if (status)
       status.textContent = text;
+  }
+}
+
+function clearConversationTask(reason) {
+  // 当前页面已经切到非目标会话时必须释放串行锁，否则左侧白名单未读会一直等不到自动切换。
+  if (!conversationTask)
+    return;
+  clearTimeout(schedulerTimer);
+  conversationTask = null;
+  if (reason)
+    setProcessingStatus(reason);
+}
+
+function dispatchEditableInput(input, content) {
+  // 经营宝的输入框是 contenteditable 的 pre，内部框架可能依赖 beforeinput/input/selectionchange。
+  // 不能只改 textContent，否则页面视觉上或许变了，但发送按钮状态和框架模型未必同步。
+  const targetDocument = input.ownerDocument;
+  input.focus();
+  const selection = targetDocument.defaultView?.getSelection();
+  const range = targetDocument.createRange();
+  input.replaceChildren();
+  input.appendChild(targetDocument.createTextNode(content));
+  range.selectNodeContents(input);
+  range.collapse(false);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  for (const event of [
+    new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: content }),
+    new InputEvent('input', { bubbles: true, inputType: 'insertText', data: content }),
+    new Event('change', { bubbles: true }),
+    new KeyboardEvent('keyup', { bubbles: true, key: 'Process', code: 'Process' })
+  ])
+    input.dispatchEvent(event);
+  targetDocument.dispatchEvent(new Event('selectionchange', { bubbles: true }));
+}
+
+function dismissSmartReplyOverlay(targetDocument) {
+  // 经营宝输入后会弹出“智能推荐回复”，可能挡住发送按钮或抢走焦点。
+  const labels = Array.from(targetDocument.querySelectorAll('*')).filter((node) => {
+    const text = node.textContent?.trim();
+    return text === '智能推荐回复' || text === '关闭';
+  });
+  for (const label of labels) {
+    const closeButton = label.closest('[class*="recommend"],[class*="suggest"],[class*="popup"],[class*="popover"]')
+      ?.querySelector('button,[role="button"],.mtd-icon-close,[class*="close"]');
+    if (closeButton) {
+      closeButton.click();
+      return true;
+    }
+  }
+  targetDocument.activeElement?.dispatchEvent?.(new KeyboardEvent('keydown', {
+    key: 'Escape',
+    code: 'Escape',
+    keyCode: 27,
+    bubbles: true,
+    cancelable: true
+  }));
+  return false;
+}
+
+function resolveSendButton(targetDocument, selector) {
+  const preferred = [
+    selector,
+    '.dzim-chat-input-send > button.send-button',
+    '.dzim-chat-input-send > button.dzim-button-primary',
+    '.dzim-chat-input-send button'
+  ].filter(Boolean);
+  for (const item of preferred) {
+    const button = queryOneDeep(targetDocument, item);
+    if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true')
+      return button;
+  }
+  // 最后按可见文本兜底，但必须落在聊天输入发送区，避免点到右侧商品“发送”。
+  const scoped = queryAllDeep(targetDocument, '.dzim-chat-input-send button, .dzim-chat-input-send [role="button"]');
+  return scoped.find((button) => (button.textContent || '').trim() === '发送') || null;
+}
+
+function clickSendControl(targetDocument, selector) {
+  // 经营宝按钮可能绑定 pointer/mouse 事件链，不只是 click；按人工点击顺序派发更稳。
+  dismissSmartReplyOverlay(targetDocument);
+  const button = resolveSendButton(targetDocument, selector);
+  if (!button)
+    return false;
+  if (button.disabled || button.getAttribute('aria-disabled') === 'true' || button.getAttribute('disabled') != null)
+    return false;
+  const view = targetDocument.defaultView;
+  const rect = button.getBoundingClientRect();
+  const clientX = rect.left + Math.max(rect.width / 2, 1);
+  const clientY = rect.top + Math.max(rect.height / 2, 1);
+  button.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  button.focus?.();
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    const EventCtor = type.startsWith('pointer') && view?.PointerEvent ? view.PointerEvent : MouseEvent;
+    button.dispatchEvent(new EventCtor(type, {
+      bubbles: true,
+      cancelable: true,
+      view,
+      buttons: 1,
+      clientX,
+      clientY,
+      screenX: clientX,
+      screenY: clientY,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true
+    }));
+  }
+  if (typeof button.click === 'function')
+    button.click();
+  return true;
+}
+
+function trySubmitByEnter(input) {
+  // 部分经营宝版本更认输入框回车，而不是发送按钮的合成点击。
+  const view = input.ownerDocument.defaultView;
+  for (const type of ['keydown', 'keypress', 'keyup']) {
+    input.dispatchEvent(new KeyboardEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      view
+    }));
   }
 }
 
@@ -249,8 +430,8 @@ function scheduleUnreadConversation(settings) {
     const input = settings.replyInputSelector ? queryOneDeep(targetDocument, settings.replyInputSelector) : null;
     if (input?.textContent?.trim() || input?.value?.trim())
       continue;
-    const unreadItem = queryAllDeep(targetDocument, settings.conversationItemSelector || '.chat-list-item')
-      .find((item) => unreadCountOf(item, settings) > 0);
+    const unreadItem = conversationItemsOf(targetDocument, settings)
+      .find((item) => unreadCountOf(item, settings) > 0 && isAllowedConversation(settings, null, item));
     if (!unreadItem)
       continue;
     const expectedConversationId = conversationIdOf(unreadItem);
@@ -262,7 +443,7 @@ function scheduleUnreadConversation(settings) {
     };
     setProcessingStatus('正在切换未读会话');
     // 使用页面真实点击事件切换客户，保持与真实商家后台行为一致。
-    unreadItem.click();
+    clickableConversationTarget(unreadItem).click();
     schedulerTimer = setTimeout(() => {
       // 页面结构变化或网络卡顿时释放任务，后续扫描可重新发现仍未处理的红点。
       // OpenClaw + Embedding 在本机可能超过 30 秒，过早切换会让返回草稿失去原会话投递目标。
@@ -294,6 +475,8 @@ async function scanMessages() {
     const conversationId = session.conversationId;
     const customerId = session.customerId;
     void safeRuntimeMessage({ type: 'diagnostics', payload: collectDiagnostics(settings, targetDocument) });
+    if (conversationTask?.expectedConversationId && conversationTask.expectedConversationId !== conversationId && Date.now() - conversationTask.startedAt > 5000)
+      clearConversationTask('已释放过期会话切换任务');
     const messageItems = queryAllDeep(targetDocument, settings.messageItemSelector);
     const outboundItems = queryAllDeep(targetDocument, settings.outboundMessageItemSelector || '.message-cell-container:has(.message-wrapper.right-message .text-message.shop-text)');
     const hasRealConversation = session.shopId !== 'default-shop'
@@ -301,6 +484,12 @@ async function scanMessages() {
     // 外层壳页面没有真实 userId，不能注册为会话，否则旧草稿可能被错误回填到当前客户输入框。
     if (!hasRealConversation)
       continue;
+    if (!isAllowedConversation(settings, session, null)) {
+      clearConversationTask(`已忽略非测试客户：${session.customerName || session.conversationId}`);
+      void safeRuntimeMessage({ type: 'clearFrameSession' });
+      setProcessingStatus(`已忽略非测试客户：${session.customerName || session.conversationId}`);
+      continue;
+    }
     void safeRuntimeMessage({ type: 'session', payload: session });
     const isInitialConversationScan = !initializedConversations.has(`${session.shopId}:${conversationId}`);
     const scheduledUnreadCount = conversationTask
@@ -369,8 +558,8 @@ async function applyDraft(draft, expectedSession) {
   if (!input)
     return;
   const canAutoSend = settings.autoSend && draft.allowAutoSend && draft.riskLevel === 'low' && settings.sendButtonSelector;
-  if (settings.autoSwitchConversations && settings.autoSend && !canAutoSend) {
-    // 全自动队列遇到转人工草稿时不能占住输入框，也不能误发；草稿继续保存在服务端供后台人工处理。
+  if (settings.autoSwitchConversations && settings.autoSend && draft.riskLevel !== 'low') {
+    // 全自动队列只跳过中高风险草稿；低风险草稿即使未通过发送冷却，也要先回填给客服确认。
     if (conversationTask && conversationTask.expectedConversationId === expectedSession?.conversationId) {
       clearTimeout(schedulerTimer);
       conversationTask = null;
@@ -379,13 +568,76 @@ async function applyDraft(draft, expectedSession) {
     }
     return;
   }
-  input.focus();
-  input.textContent = draft.content;
-  input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: draft.content }));
+  dispatchEditableInput(input, draft.content);
   // 自动发送必须同时满足扩展开关和服务端安全环境变量；默认永远只回填供人工确认。
   if (canAutoSend) {
-    queryOneDeep(input.ownerDocument, settings.sendButtonSelector)?.click();
-    setProcessingStatus(`已自动回复：${expectedSession?.customerName || expectedSession?.conversationId || ''}`);
+    setTimeout(() => {
+      dismissSmartReplyOverlay(input.ownerDocument);
+      let clicked = clickSendControl(input.ownerDocument, settings.sendButtonSelector);
+      let method = clicked ? 'send-button' : '';
+      if (!clicked) {
+        trySubmitByEnter(input);
+        clicked = clickSendControl(input.ownerDocument, settings.sendButtonSelector);
+        method = clicked ? 'enter+send-button' : 'enter-only';
+      }
+      // 经营宝有时要等内部状态刷新后才真正启用发送，再补一次延迟点击。
+      if (clicked) {
+        setTimeout(() => {
+          dismissSmartReplyOverlay(input.ownerDocument);
+          clickSendControl(input.ownerDocument, settings.sendButtonSelector);
+        }, 500);
+      }
+      setProcessingStatus(clicked
+        ? `已自动回复：${expectedSession?.customerName || expectedSession?.conversationId || ''}`
+        : `已回填但发送失败：${settings.sendButtonSelector}`);
+      void safeRuntimeMessage({
+        type: 'draft_send_result',
+        payload: {
+          platform: expectedSession?.platform,
+          shopId: expectedSession?.shopId,
+          conversationId: expectedSession?.conversationId,
+          customerId: expectedSession?.customerId,
+          customerName: expectedSession?.customerName,
+          draftId: draft.id,
+          riskLevel: draft.riskLevel,
+          allowAutoSend: true,
+          clicked,
+          filledOnly: !clicked,
+          method: method || (clicked ? 'send-button' : 'none'),
+          content: draft.content
+        }
+      });
+    }, 400);
+  } else {
+    // 低风险但暂未满足自动点击条件时，保留在输入框，便于现场人工确认和排查发送冷却/服务端开关。
+    const skipReason = !settings.autoSend
+      ? '弹窗未勾选自动发送'
+      : draft.allowAutoSend !== true
+        ? `服务端未授权自动发送${draft.denyReason ? `（${draft.denyReason}）` : ''}`
+        : draft.riskLevel !== 'low'
+          ? `风险等级 ${draft.riskLevel}，仅 low 可自动发送`
+          : !settings.sendButtonSelector
+            ? '发送按钮选择器为空'
+            : '条件未满足';
+    setProcessingStatus(`已回填待确认：${skipReason}`);
+    void safeRuntimeMessage({
+      type: 'draft_send_result',
+      payload: {
+        platform: expectedSession?.platform,
+        shopId: expectedSession?.shopId,
+        conversationId: expectedSession?.conversationId,
+        customerId: expectedSession?.customerId,
+        customerName: expectedSession?.customerName,
+        draftId: draft.id,
+        riskLevel: draft.riskLevel,
+        allowAutoSend: false,
+        denyReason: draft.denyReason || skipReason,
+        clicked: false,
+        filledOnly: true,
+        method: 'fill-only',
+        content: draft.content
+      }
+    });
   }
   // 当前客户已经拿到草稿后才释放串行锁；下一轮扫描才允许切换到另一个未读客户。
   if (conversationTask && conversationTask.expectedConversationId === expectedSession?.conversationId) {

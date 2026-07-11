@@ -124,7 +124,7 @@
 
       <section id="rpa">
         <h2>六、Chrome 插件多会话 RPA</h2>
-        <ol><li>插件通过 <code>ws://127.0.0.1:3001/rpa/extension/ws</code> 连接 API。</li><li>监听左侧未读会话并串行点击切换客户。</li><li>读取真实 <code>shopId + conversationId + messageId</code>。</li><li>只用该会话最新一条未读消息触发回复，避免连续拆句生成多份回答。</li><li>最多等待 120 秒，草稿返回后再次校验当前门店和客户。</li><li>只有 low 风险、开关已开启且通过冷却的草稿才点击页面发送按钮。</li><li>页面观察到 outbound 后，将对应 ReplyDraft 标记为 sent。</li></ol>
+        <ol><li>插件通过 <code>ws://127.0.0.1:3001/rpa/extension/ws</code> 连接 API。</li><li>监听左侧未读会话并串行点击切换客户，默认兼容 <code>.chat-list-item-wrapper</code>、<code>.chat-list-item</code> 和 <code>.virtual-list-item</code>。</li><li>美团经营宝未读数字按 <code>.mtd-badge-text.mtd-badge-position</code> 判断，例如角标文本 <code>1</code>；避免使用过宽的 <code>.mtd-badge</code> 容器误判。</li><li>读取真实 <code>shopId + conversationId + messageId</code>。</li><li>线上灰度可通过 <code>MEITUAN_RPA_ALLOWED_CUSTOMERS</code> 限定只处理指定测试客户；入站、出站、会话注册和草稿查询都会服务端兜底校验。</li><li>当前页面若停在非白名单客户，插件会清理该 frame 的旧会话映射并释放调度锁，继续寻找白名单未读客户。</li><li>只用该会话最新一条未读消息触发回复，避免连续拆句生成多份回答。</li><li>最多等待 120 秒，草稿返回后再次校验当前门店和客户。</li><li>低风险草稿若暂未满足自动点击条件，会先回填输入框；美团白名单灰度会话在 low 风险、开关已开启、连接后新生成且通过冷却时点击页面发送按钮。</li><li>页面观察到 outbound 后，将对应 ReplyDraft 标记为 sent。</li></ol>
         <div class="notice">Mock 自动消息使用 30–70 秒随机空档；最近 10 条问题不重复，且不会继续向已有未读积压的客户生成消息。Mock 能力不能等同于真实平台生产稳定性。</div>
       </section>
 

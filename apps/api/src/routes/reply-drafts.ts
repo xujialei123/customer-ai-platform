@@ -7,6 +7,7 @@
  */
 import { prisma } from '../lib/prisma.js';
 import { SendService } from '../services/send.service.js';
+import { isRpaCustomerAllowed } from '../rpa/customer-allowlist.js';
 export async function replyDraftRoutes(app) {
     const sendService = new SendService();
     app.get('/reply-drafts/recent', async (request) => {
@@ -31,6 +32,16 @@ export async function replyDraftRoutes(app) {
         if (!conversation) {
             return { ok: true, drafts: [] };
         }
+        if (!isRpaCustomerAllowed({
+            platform: conversation.platform,
+            shopId: conversation.shopId,
+            conversationId: conversation.platformConversationId,
+            customerId: conversation.customerId,
+            customerName: conversation.customerName ?? undefined
+        })) {
+            // 草稿查询再做一次服务端白名单兜底，避免旧插件或旧会话把历史草稿推给非测试客户。
+            return { ok: true, drafts: [], ignored: true, reason: 'customer_not_allowed' };
+        }
         const drafts = await prisma.replyDraft.findMany({
             where: {
                 conversationId: conversation.id
@@ -43,11 +54,28 @@ export async function replyDraftRoutes(app) {
             },
             take: limit
         });
-        // RPA mock watcher 会轮询这个接口，把新草稿回显到测试聊天页。
-        // 真实抖音/美团接入时，这里可替换为人工审核台或 RPA sender 队列。
-        return {
-            ok: true,
-            drafts: drafts.reverse().map((draft) => ({
+        // 判断“这个问题有没有回过”必须绑在具体 messageId / 草稿内容上。
+        // 不能用“之后任意 outbound”：经营宝页面回扫历史客服气泡时常用当前时间戳入库，
+        // 会把刚生成的 pending 误判成已回复，随后被网关 reject，导致既不回填也不发送。
+        const sentDraftMessageIds = new Set((await prisma.replyDraft.findMany({
+            where: { conversationId: conversation.id, status: 'sent' },
+            select: { messageId: true }
+        })).map((item) => item.messageId));
+        const recentOutbounds = await prisma.message.findMany({
+            where: { conversationId: conversation.id, direction: 'outbound' },
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+            select: { content: true, createdAt: true }
+        });
+        const mapped = drafts.reverse().map((draft) => {
+            const inboundTime = draft.message?.createdAt?.getTime?.() ?? new Date(draft.createdAt).getTime();
+            const draftContent = String(draft.content ?? '').trim();
+            const contentAlreadySent = Boolean(draftContent) && recentOutbounds.some((item) => {
+                const outboundTime = new Date(item.createdAt).getTime();
+                return outboundTime >= inboundTime && String(item.content ?? '').trim() === draftContent;
+            });
+            const alreadyReplied = sentDraftMessageIds.has(draft.messageId) || contentAlreadySent;
+            return {
                 id: draft.id,
                 messageId: draft.messageId,
                 userMessage: draft.message.content,
@@ -55,8 +83,15 @@ export async function replyDraftRoutes(app) {
                 status: draft.status,
                 riskLevel: draft.riskLevel,
                 reason: draft.reason,
-                createdAt: draft.createdAt
-            }))
+                createdAt: draft.createdAt,
+                alreadyReplied
+            };
+        });
+        // RPA mock watcher 会轮询这个接口，把新草稿回显到测试聊天页。
+        // 真实抖音/美团接入时，这里可替换为人工审核台或 RPA sender 队列。
+        return {
+            ok: true,
+            drafts: mapped
         };
     });
     app.post('/reply-drafts/:id/approve', async (request, reply) => {

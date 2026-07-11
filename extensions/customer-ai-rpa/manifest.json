@@ -4,7 +4,7 @@
   "_relatedModules": "版本号与 host_permissions。",
   "manifest_version": 3,
   "name": "客服中台 RPA 助手",
-  "version": "0.2.0",
+  "version": "0.2.4",
   "description": "在正常 Chrome 登录会话中桥接美团经营宝消息与本地客服中台。",
   "permissions": [
     "storage",

@@ -12,7 +12,10 @@ async function load() {
   await chrome.runtime.sendMessage({ type: 'ensureConnection' }).catch(() => undefined);
   const values = await chrome.storage.local.get();
   const runtimeStatus = await chrome.runtime.sendMessage({ type: 'getStatus' }).catch(() => null);
-  const currentSession = runtimeStatus?.sessions?.at(-1);
+  const apiStatus = await fetch('http://127.0.0.1:3001/rpa/extension/status')
+    .then((response) => response.json())
+    .catch(() => null);
+  const currentSession = runtimeStatus?.sessions?.at(-1) || apiStatus?.sessions?.at(-1);
   if (currentSession?.shopId && currentSession.shopId !== 'default-shop')
     values.shopId = currentSession.shopId;
   for (const field of fields) {
@@ -23,10 +26,29 @@ async function load() {
       element.value = values[field] ?? '';
   }
   const status = document.getElementById('status');
-  status.textContent = values.connectionState === 'connected'
+  const serverAutoSend = apiStatus?.rpaAutoSendEnabled === true;
+  const base = values.connectionState === 'connected'
     ? (currentSession?.shopId ? `已连接 · ${currentSession.shopId}` : '已连接本地服务')
     : '本地服务未连接';
+  status.textContent = values.connectionState === 'connected'
+    ? `${base} · 服务端自动发送${serverAutoSend ? '开' : '关'}`
+    : base;
   status.style.color = values.connectionState === 'connected' ? '#067647' : '#b54708';
+  if (values.connectionState === 'connected' && values.autoSend && !serverAutoSend) {
+    const resultNode = document.getElementById('ai-result');
+    resultNode.style.display = 'block';
+    resultNode.className = 'error';
+    resultNode.textContent = '弹窗已开自动发送，但服务端 RPA_AUTO_SEND_ENABLED=false。请确认 .env 后重启 pnpm dev。';
+  }
+  // 旧占位选择器会导致“能读消息但点不了发送”，打开弹窗时直接纠正并提示。
+  const sendInput = document.getElementById('sendButtonSelector');
+  if (sendInput?.value && String(sendInput.value).includes('not-configured')) {
+    sendInput.value = '.dzim-chat-input-send > button.dzim-button-primary';
+    const resultNode = document.getElementById('ai-result');
+    resultNode.style.display = 'block';
+    resultNode.className = 'error';
+    resultNode.textContent = '检测到占位发送选择器，已替换为经营宝真实按钮；请勾选“允许自动点击发送”后点保存';
+  }
 }
 
 document.getElementById('save').addEventListener('click', async () => {

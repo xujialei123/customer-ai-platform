@@ -16,9 +16,11 @@ const runtimeRoot = process.env.CUSTOMER_AI_ROOT
     : resolve(currentDir, '../../../../');
 // workspace 命令会在 apps/api 下执行，不能依赖 dotenv 的默认查找路径。
 // 这里显式读取项目根目录 .env，并固定 UTF-8，避免 Windows 中文配置出现乱码。
+// override:true 确保重启/热重载后以项目 .env 为准，避免旧 process.env 里的 false 把自动发送开关卡死。
 config({
     path: resolve(runtimeRoot, '.env'),
-    encoding: 'utf8'
+    encoding: 'utf8',
+    override: true
 });
 const booleanString = z.preprocess((value) => {
     if (typeof value === 'string') {
@@ -78,7 +80,9 @@ const envSchema = z.object({
     // 不能使用 z.coerce.boolean()，因为字符串 "false" 会被 Boolean("false") 转成 true。
     // 自动发送开关必须严格解析，避免测试阶段误发消息。
     AUTO_REPLY_ENABLED: booleanString.default(false),
-    RPA_AUTO_SEND_ENABLED: booleanString.default(false)
+    RPA_AUTO_SEND_ENABLED: booleanString.default(false),
+    // 真实美团灰度时只允许指定客户进入 RPA 链路，避免线上测试误处理非测试顾客。
+    MEITUAN_RPA_ALLOWED_CUSTOMERS: z.string().optional().default('')
 });
 const parsedEnv = envSchema.parse(process.env);
 function resolveOpenClawToken() {

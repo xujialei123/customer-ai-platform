@@ -29,17 +29,24 @@ export class HybridRetriever {
   ) {}
 
   async retrieve(input: HybridRetrieveInput): Promise<RetrievalCandidate[]> {
-    const queryTexts = [...new Set([input.query, ...input.rewrittenQueries])];
+    // 短问候/短句只编码原 query；长问题最多再带 1 条改写，避免 4～5 次 Embedding 把客服回复拖到十几秒。
+    // 改写词仍进入关键词召回，不依赖全部改写句都做向量检索。
+    const queryTexts = input.query.trim().length <= 8
+      ? [input.query]
+      : [...new Set([input.query, ...input.rewrittenQueries.slice(0, 1)])];
+    const embedStarted = Date.now();
     const embeddings = await this.embeddingProvider.embedTexts(queryTexts);
+    const embedMs = Date.now() - embedStarted;
     const merged = new Map<string, RetrievalCandidate>();
-    for (const embedding of embeddings) {
-      const vectorHits = await this.store.vectorSearch(embedding, {
-        platform: input.platform,
-        shopId: input.shopId,
-        // 多意图问题可能同时需要套餐与退款卡片，分类只参与加权，不能在召回阶段硬排除。
-        category: undefined,
-        limit: ragRetrievalConfig.vectorTopK
-      });
+    // 多路向量检索并行，避免串行 await 放大延迟。
+    const vectorHitGroups = await Promise.all(embeddings.map((embedding) => this.store.vectorSearch(embedding, {
+      platform: input.platform,
+      shopId: input.shopId,
+      // 多意图问题可能同时需要套餐与退款卡片，分类只参与加权，不能在召回阶段硬排除。
+      category: undefined,
+      limit: ragRetrievalConfig.vectorTopK
+    })));
+    for (const vectorHits of vectorHitGroups) {
       for (const hit of vectorHits) {
         const existed = merged.get(hit.card.id);
         if (!existed || hit.score > existed.vectorScore) {
@@ -103,6 +110,7 @@ export class HybridRetriever {
       if (candidate.card.category === input.category && candidate.vectorScore >= 0.68 && candidate.keywordScore >= 0.25)
         candidate.score = Math.max(candidate.score, 0.76);
     }
+    console.log(`[HybridRetriever] embed=${embedMs}ms queries=${queryTexts.length} candidates=${merged.size}`);
     return [...merged.values()].sort((left, right) => right.score - left.score).slice(0, ragRetrievalConfig.rerankTopK);
   }
 }

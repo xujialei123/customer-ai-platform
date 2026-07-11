@@ -12,6 +12,7 @@ import { MessageService } from '../services/message.service.js';
 import { getRpaSelectorConfig, rpaSelectorSchema, updateRpaSelectorConfig } from '../rpa/selector-config.js';
 import { getRpaExtensionStatus } from '../rpa/extension-gateway.js';
 import { OpenClawClient } from '../services/openclaw.service.js';
+import { buildRpaAllowlistStatus, isRpaCustomerAllowed } from '../rpa/customer-allowlist.js';
 const rpaInboundSchema = z.object({
     platform: z.enum(['douyin', 'meituan']),
     id: z.string(),
@@ -47,7 +48,7 @@ export async function rpaRoutes(app) {
     const messageService = new MessageService();
     const openClawClient = new OpenClawClient();
     // 仅返回连接数量和会话标识，不暴露平台 Cookie、账号或页面内容。
-    app.get('/rpa/extension/status', async () => ({ ok: true, ...getRpaExtensionStatus() }));
+    app.get('/rpa/extension/status', async () => ({ ok: true, ...getRpaExtensionStatus(), ...buildRpaAllowlistStatus() }));
     app.post('/rpa/extension/analyze-dom', async (request, reply) => {
         const body = z.object({
             snapshot: z.object({
@@ -90,6 +91,10 @@ export async function rpaRoutes(app) {
     // RPA 统一入口：抖音、美团 watcher 提取到新消息后，统一发到这里。
     app.post('/rpa/inbound', async (request, reply) => {
         const body = rpaInboundSchema.parse(request.body);
+        if (!isRpaCustomerAllowed(body)) {
+            // 非白名单美团客户不进入数据库和队列，线上灰度只处理指定测试账号。
+            return reply.send({ ok: true, ignored: true, reason: 'customer_not_allowed' });
+        }
         const adapter = getAdapter(body.platform);
         const unified = await adapter.parseInbound(body);
         const saved = await messageService.saveInboundMessage(unified);
@@ -102,6 +107,10 @@ export async function rpaRoutes(app) {
     // 扩展观察到商家消息真正出现在页面后再入库，避免把“仅回填输入框”的草稿误认为已经发送。
     app.post('/rpa/outbound', async (request, reply) => {
         const body = rpaOutboundSchema.parse(request.body);
+        if (!isRpaCustomerAllowed(body)) {
+            // 商家手工回复其他客户时不写入本系统，避免白名单测试污染真实会话上下文。
+            return reply.send({ ok: true, ignored: true, reason: 'customer_not_allowed' });
+        }
         const saved = await messageService.saveOutboundMessage({
             ...body,
             raw: body,

@@ -42,9 +42,11 @@ export async function startMeituanWatcher() {
             createdAtAttribute: process.env.MEITUAN_RPA_CREATED_AT_ATTRIBUTE ?? 'data-created-at'
         },
         senderSelectors: {
-            // 已确认编辑器是 plaintext-only；发送按钮仍需现场确认稳定选择器后才能启用自动发送。
-            replyInput: process.env.MEITUAN_RPA_REPLY_INPUT_SELECTOR ?? 'pre[contenteditable="plaintext-only"]',
-            sendButton: process.env.MEITUAN_RPA_SEND_BUTTON_SELECTOR ?? '[data-rpa-send-button-not-configured]'
+            // 与 Chrome 插件 / 本地 DOM 兜底选择器保持一致；页面改版后优先用插件自动配置覆盖。
+            replyInput: process.env.MEITUAN_RPA_REPLY_INPUT_SELECTOR
+                ?? '.dzim-chat-input-container[contenteditable="plaintext-only"]',
+            sendButton: process.env.MEITUAN_RPA_SEND_BUTTON_SELECTOR
+                ?? '.dzim-chat-input-send > button.dzim-button-primary'
         },
         renderDraftToPage: false
     });
