@@ -4,21 +4,23 @@
   "_relatedModules": "版本号与 host_permissions。",
   "manifest_version": 3,
   "name": "客服中台 RPA 助手",
-  "version": "0.2.4",
-  "description": "在正常 Chrome 登录会话中桥接美团经营宝消息与本地客服中台。",
+  "version": "0.3.16",
+  "description": "在 Chrome 登录会话中同时桥接美团经营宝与抖音来客消息到本地客服中台。",
   "permissions": [
     "storage",
     "tabs",
     "scripting",
     "webNavigation",
-    "alarms"
+    "alarms",
+    "dom"
   ],
   "host_permissions": [
     "http://127.0.0.1:3001/*",
     "http://127.0.0.1:3100/*",
     "http://localhost:3100/*",
     "https://g.dianping.com/*",
-    "https://ecom.meituan.com/*"
+    "https://ecom.meituan.com/*",
+    "https://life.douyin.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -29,9 +31,11 @@
         "http://127.0.0.1:3100/*",
         "http://localhost:3100/*",
         "https://g.dianping.com/*",
-        "https://ecom.meituan.com/*"
+        "https://ecom.meituan.com/*",
+        "https://life.douyin.com/*"
       ],
       "js": [
+        "platform-profiles.js",
         "content.js"
       ],
       "all_frames": true,

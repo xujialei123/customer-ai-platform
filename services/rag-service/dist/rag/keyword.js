@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/keyword.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 中文关键词提取和 BM25 式评分。
+ * @see 联动关注：口语化 query 召回补强。
+ */
 const stopWords = new Set(['请问', '一下', '这个', '那个', '你们', '我们', '可以', '能不能', '是否', '怎么', '怎么样']);
 export function normalizeChineseText(text) {
     return text.toLowerCase().replace(/[\s，。！？、,.!?;；:：()（）【】\[\]"'“”‘’]/g, '');

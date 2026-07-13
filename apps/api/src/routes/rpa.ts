@@ -7,12 +7,14 @@
  */
 import { z } from 'zod';
 import { getAdapter } from '../adapters/index.js';
-import { inboundMessageQueue } from '../lib/queue.js';
+import { enqueueInboundMessage } from '../lib/queue.js';
 import { MessageService } from '../services/message.service.js';
 import { getRpaSelectorConfig, rpaSelectorSchema, updateRpaSelectorConfig } from '../rpa/selector-config.js';
-import { getRpaExtensionStatus } from '../rpa/extension-gateway.js';
+import { getRpaExtensionStatus, broadcastRpaAllowlistUpdate } from '../rpa/extension-gateway.js';
 import { OpenClawClient } from '../services/openclaw.service.js';
-import { buildRpaAllowlistStatus, isRpaCustomerAllowed } from '../rpa/customer-allowlist.js';
+import { buildRpaAllowlistStatus, isRpaCustomerAllowed, refreshRpaAllowlistCache } from '../rpa/customer-allowlist.js';
+import { updateRpaAllowlistConfig, getRpaAllowlistConfig } from '../rpa/allowlist-config.js';
+import { terminalLog } from '../utils/terminal-log.js';
 const rpaInboundSchema = z.object({
     platform: z.enum(['douyin', 'meituan']),
     id: z.string(),
@@ -49,6 +51,35 @@ export async function rpaRoutes(app) {
     const openClawClient = new OpenClawClient();
     // 仅返回连接数量和会话标识，不暴露平台 Cookie、账号或页面内容。
     app.get('/rpa/extension/status', async () => ({ ok: true, ...getRpaExtensionStatus(), ...buildRpaAllowlistStatus() }));
+    app.get('/rpa/allowlist', async () => {
+        const config = await getRpaAllowlistConfig();
+        return { ok: true, ...config };
+    });
+    app.put('/rpa/allowlist', async (request) => {
+        const body = z.object({
+            meituan: z.array(z.string()).optional(),
+            douyin: z.array(z.string()).optional(),
+            // 也接受逗号分隔字符串，方便配置页 textarea 直接提交。
+            meituanText: z.string().optional(),
+            douyinText: z.string().optional()
+        }).parse(request.body ?? {});
+        const parseText = (text) => String(text || '')
+            .split(/[,，\n]/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+        const saved = await updateRpaAllowlistConfig({
+            meituan: Array.isArray(body.meituan) ? body.meituan : (body.meituanText != null ? parseText(body.meituanText) : undefined),
+            douyin: Array.isArray(body.douyin) ? body.douyin : (body.douyinText != null ? parseText(body.douyinText) : undefined)
+        });
+        await refreshRpaAllowlistCache();
+        const status = broadcastRpaAllowlistUpdate();
+        terminalLog('warn', {
+            denyReason: 'allowlist_updated',
+            platform: 'meituan',
+            content: `美团=${saved.meituan.length ? saved.meituan.join(',') : '全部开放'}；抖音=${saved.douyin.length ? saved.douyin.join(',') : '全部开放'}`
+        });
+        return { ok: true, ...saved, syncedClients: status };
+    });
     app.post('/rpa/extension/analyze-dom', async (request, reply) => {
         const body = z.object({
             snapshot: z.object({
@@ -100,8 +131,14 @@ export async function rpaRoutes(app) {
         const saved = await messageService.saveInboundMessage(unified);
         if (!saved.duplicated) {
             // 新消息才进入异步回复队列；重复消息只返回成功，避免客户刷新页面导致多次生成草稿。
-            await inboundMessageQueue.add('reply', { messageId: saved.message.id });
+            await enqueueInboundMessage(saved.message.id);
         }
+        terminalLog('inbound', {
+            platform: body.platform,
+            customer: body.customerName || body.customerId || body.conversationId,
+            duplicated: saved.duplicated,
+            content: body.content
+        });
         return reply.send({ ok: true, duplicated: saved.duplicated });
     });
     // 扩展观察到商家消息真正出现在页面后再入库，避免把“仅回填输入框”的草稿误认为已经发送。
@@ -116,6 +153,13 @@ export async function rpaRoutes(app) {
             raw: body,
             createdAt: body.createdAt ?? new Date().toISOString()
         });
+        if (!saved.duplicated) {
+            terminalLog('outbound', {
+                platform: body.platform,
+                customer: body.customerName || body.customerId || body.conversationId,
+                content: body.content
+            });
+        }
         return reply.send({ ok: true, duplicated: saved.duplicated });
     });
 }

@@ -1,0 +1,69 @@
+<!--
+  @file docs/deployment-guide.html
+  @module 项目流程与交付文档
+  @description 开发、Windows 便携交付和生产灰度上线的可执行部署手册。
+  @see 联动关注：README、docker-compose.yml、scripts/build-windows-portable.ps1、docs/project-flow.html。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Customer AI 部署与上线手册</title>
+  <style>
+    :root{--ink:#172033;--muted:#667085;--line:#e4e7ec;--blue:#175cd3;--soft:#f8fafc;--ok:#067647;--warn:#b54708;--danger:#b42318}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--soft)}header{padding:42px 24px;background:linear-gradient(135deg,#102a56,#175cd3);color:#fff}header div,main{max-width:1080px;margin:auto}h1{margin:0 0 10px;font-size:32px}header p{margin:0;opacity:.86}main{padding:26px 22px 56px}.nav,.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.nav a,.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px}.nav a{text-decoration:none;color:var(--blue);font-weight:600}.card{margin:12px 0}h2{margin-top:36px;padding-bottom:9px;border-bottom:1px solid var(--line)}h3{margin:0 0 9px}p,li{line-height:1.75}code{background:#eef4ff;padding:2px 5px;border-radius:4px}pre{overflow:auto;background:#101828;color:#e6edf7;padding:16px;border-radius:8px;line-height:1.55}.ok,.warn,.danger{border-left:4px solid;padding:12px 14px;background:#fff;margin:12px 0}.ok{border-color:var(--ok)}.warn{border-color:var(--warn)}.danger{border-color:var(--danger)}table{width:100%;border-collapse:collapse;background:#fff}th,td{text-align:left;padding:11px;border:1px solid var(--line);vertical-align:top}th{background:#f2f4f7}@media(max-width:760px){.nav,.grid{grid-template-columns:1fr}h1{font-size:26px}}
+  </style>
+</head>
+<body>
+  <header><div><h1>部署与上线手册</h1><p>覆盖开发验证、Windows 便携交付、生产基线、RPA 灰度、验收、备份与回滚。</p></div></header>
+  <main>
+    <div class="nav"><a href="#preflight">1. 上线前检查</a><a href="#dev">2. 开发部署</a><a href="#portable">3. Windows 便携交付</a><a href="#production">4. 生产基线</a><a href="#rpa">5. RPA 灰度</a><a href="#acceptance">6. 验收与回滚</a></div>
+
+    <section id="preflight"><h2>一、上线前检查</h2>
+      <div class="grid"><div class="card"><h3>必需软件</h3><p>Node.js 20+、pnpm 9.15、Docker Desktop、Google Chrome。源码部署还需要 PostgreSQL/pgvector 与 Redis，默认可由 Docker Compose 提供。</p></div><div class="card"><h3>端口</h3><p><code>3001</code> API、<code>8787</code> RAG、<code>18789</code> OpenClaw、<code>5433</code> PostgreSQL、<code>6379</code> Redis。生产机防火墙只应按实际访问范围开放。</p></div><div class="card"><h3>安全默认值</h3><p><code>AUTO_REPLY_ENABLED=false</code>、<code>RPA_AUTO_SEND_ENABLED=false</code>、<code>RPA_DRY_RUN=true</code>。首次上线不得跳过灰度。</p></div></div>
+      <div class="ok"><strong>OpenClaw 路径：</strong>便携包固定使用包根下的 <code>openclaw/</code>。<code>OPENCLAW_PORTABLE_ROOT</code> / <code>OPENCLAW_TOKEN_FILE</code> 可留空，由运行时按相对路径自动发现；仅开发机 OpenClaw 在项目外时才在本机 <code>.env</code> 写绝对路径覆盖。</div>
+      <div class="danger"><strong>密钥边界：</strong>模型 Key、平台 Token、Cookie、账号密码只放部署机环境变量或密钥系统，不写入仓库、便携包和 HTML。</div>
+    </section>
+
+    <section id="dev"><h2>二、源码开发部署</h2>
+      <ol><li>复制 <code>.env.example</code> 为 <code>.env</code>，逐项填写真实配置。</li><li>启动依赖并迁移数据库。</li><li>构建全部工作区，再启动服务。</li></ol>
+      <pre>chcp 65001
+$OutputEncoding = [System.Text.Encoding]::UTF8
+Copy-Item .env.example .env
+pnpm install
+docker compose up -d
+pnpm prisma:migrate
+pnpm build:all
+pnpm dev</pre>
+      <div class="ok"><strong>最小健康检查：</strong><code>http://127.0.0.1:3001/health</code>、<code>http://127.0.0.1:3001/health/openclaw</code>、<code>http://127.0.0.1:8787/health</code> 均应正常；知识库管理页为 <code>http://127.0.0.1:8787/kb-admin</code>。</div>
+    </section>
+
+    <section id="portable"><h2>三、Windows 便携交付</h2>
+      <pre>pnpm build:all
+pnpm package:windows</pre>
+      <ol><li>从 <code>release\Customer-AI-Portable-YYYYMMDD-HHmmss</code> 取完整目录，不拆散内部结构。</li><li>交付前确认包内没有项目 <code>.env</code>、OpenClaw data、Cookie、会话目录和日志。</li><li>客户机安装 Docker Desktop 与 Chrome，双击 <code>Start-Customer-AI.bat</code>。</li><li>在引导页配置模型服务；从 <code>chrome://extensions</code> 以开发者模式加载 <code>extensions\customer-ai-rpa</code>。</li><li>停止使用 <code>Stop-Customer-AI.bat</code>，诊断使用 <code>Doctor-Customer-AI.bat</code>。</li></ol>
+      <div class="warn">便携包是 Windows 单机交付方式，不等同于高可用生产集群。数据库卷、知识库和浏览器 Profile 必须纳入客户机备份。</div>
+    </section>
+
+    <section id="production"><h2>四、生产部署基线</h2>
+      <table><thead><tr><th>组件</th><th>生产要求</th><th>验收</th></tr></thead><tbody><tr><td>API / ReplyWorker</td><td>建议拆分进程；配置进程守护、结构化日志和失败告警。</td><td>进程重启后消息不重复生成草稿。</td></tr><tr><td>PostgreSQL</td><td>启用 pgvector；独立账号、最小权限、每日备份和恢复演练。</td><td>迁移完成，业务表与 RAG 表均可读写。</td></tr><tr><td>Redis</td><td>启用持久化与访问控制；禁止暴露公网。</td><td>BullMQ waiting/active/failed 可观测。</td></tr><tr><td>RAG / 模型</td><td>使用真实 embedding 与 LLM；设置超时和调用配额。</td><td>门店问题可召回证据，无证据固定转人工。</td></tr><tr><td>入口安全</td><td>外部 Webhook 使用 HTTPS 反向代理；校验签名、限制来源和请求大小。</td><td>伪造回调被拒绝，健康接口不泄密。</td></tr></tbody></table>
+      <div class="warn">当前 Chrome 扩展 RPA 依赖客服电脑的已登录页面。若需要无人值守、多机容灾或集中调度，需另行建设持久化租约、心跳选主、发送审计和人工接管工作台后再宣称生产高可用。</div>
+    </section>
+
+    <section id="rpa"><h2>五、RPA 灰度上线</h2>
+      <ol><li>保持服务端和插件自动发送均关闭，只验证页面识别、会话 ID、inbound 入库和草稿回填。</li><li>在 <code>http://127.0.0.1:3001/guide</code> 为美团、抖音分别配置测试客户白名单。空白名单表示全量开放，灰度期禁止留空。</li><li>用退款、投诉、赔偿、食品安全、无知识库答案等问题验证必须转人工。</li><li>服务端设置 <code>RPA_AUTO_SEND_ENABLED=true</code> 并重启，再仅对测试客户打开插件自动发送。</li><li>核对草稿状态：<code>pending → dispatching → sent</code>。点击按钮只进入 dispatching；页面观察到真实 outbound 才算 sent。</li><li>至少完成跨门店、同名客户、页面切换、断网重连、刷新、连续消息和人工抢答测试，再逐步扩大白名单。</li></ol>
+      <div class="danger"><strong>立即停发条件：</strong>串会话、重复发送、高风险自动发送、知识库外编造、页面选择器漂移或 outbound 无法确认。关闭插件开关与 <code>RPA_AUTO_SEND_ENABLED</code> 后再排查。</div>
+    </section>
+
+    <section id="acceptance"><h2>六、验收、备份与回滚</h2>
+      <p>便携包 RPA 专项验收清单见包内 <code>portable-test-checklist.html</code>（打包时随 <code>packaging/windows-portable</code> 一并复制）。</p>
+      <h3>发布验收</h3><pre>pnpm --filter @customer-ai/api test
+pnpm build:all</pre>
+      <ul><li>检查 <code>docs/project-flow.html</code> 与本手册能直接打开、中文可读、UTF-8 无 BOM。</li><li>重复投递同一 messageId，只入库一次且只产生一份队列任务/草稿。</li><li>白名单外客户不入库、不排队、不回填、不发送。</li><li>RAG 失败、OpenClaw 失败和高风险问题均保留人工草稿，不伪装成功。</li></ul>
+      <h3>备份</h3><p>备份 PostgreSQL、Redis 持久化数据（如启用）、知识库上传目录、运行时配置与 Chrome Profile。密钥备份应使用独立加密介质。</p>
+      <h3>回滚</h3><ol><li>先关闭两个自动发送开关，保留人工接管。</li><li>停止应用进程，恢复上一版本应用目录和匹配的环境配置。</li><li>数据库迁移仅按已评审的回滚 SQL 执行；不使用破坏性 reset。</li><li>重新运行健康检查和只读链路测试，最后再恢复白名单灰度。</li></ol>
+      <p><a href="project-flow.html">返回项目流程总览</a></p>
+    </section>
+  </main>
+</body>
+</html>

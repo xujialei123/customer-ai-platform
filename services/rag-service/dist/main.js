@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/main.ts
+ * @module RAG Service 兼容层
+ * @description 启动 8787 端口 Fastify RAG 服务。
+ * @see 联动关注：routes/api.ts 和 admin-page.ts。
+ */
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import Fastify from 'fastify';

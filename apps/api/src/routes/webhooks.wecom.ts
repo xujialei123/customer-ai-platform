@@ -7,7 +7,7 @@
  */
 import { env } from '../config/env.js';
 import { getAdapter } from '../adapters/index.js';
-import { inboundMessageQueue } from '../lib/queue.js';
+import { enqueueInboundMessage } from '../lib/queue.js';
 import { MessageService } from '../services/message.service.js';
 import { decryptWeComMessage, parseWeComXml, verifyWeComUrl } from '../services/wecom-crypto.service.js';
 import { WeComClient } from '../services/wecom-client.service.js';
@@ -22,7 +22,7 @@ export async function wecomWebhookRoutes(app) {
         const unified = await adapter.parseInbound(raw);
         const saved = await messageService.saveInboundMessage(unified);
         if (!saved.duplicated) {
-            await inboundMessageQueue.add('reply', { messageId: saved.message.id });
+            await enqueueInboundMessage(saved.message.id);
         }
         return saved;
     }

@@ -20,7 +20,17 @@ const chromeCandidates = [
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
 ].filter(Boolean);
-const openClawPortableRoot = process.env.OPENCLAW_PORTABLE_ROOT ?? '';
+function resolveDevOpenClawRoot() {
+    // 开发机可写绝对路径；未配置时优先用项目旁/包内的 openclaw 相对目录。
+    const configured = String(process.env.OPENCLAW_PORTABLE_ROOT ?? '').trim();
+    if (configured)
+        return configured;
+    const bundled = resolve(projectRoot, 'openclaw');
+    if (existsSync(resolve(bundled, 'Start-OpenClaw.ps1')))
+        return bundled;
+    return '';
+}
+const openClawPortableRoot = resolveDevOpenClawRoot();
 const openClawGatewayUrl = process.env.OPENCLAW_GATEWAY_URL ?? 'http://127.0.0.1:18789';
 const processes = [
     {

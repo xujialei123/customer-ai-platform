@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/services/store.ts
+ * @module RAG Service 兼容层
+ * @description 旧 KB/File 内存缓存和 PostgreSQL 持久化恢复。
+ * @see 联动关注：init-db.sql 和 uploads 目录。
+ */
 import { readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

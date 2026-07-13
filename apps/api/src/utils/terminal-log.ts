@@ -19,11 +19,38 @@ const ansi = {
     white: '\x1b[37m'
 };
 
-function paint(color, text) {
+type TerminalLogEvent =
+    | 'inbound'
+    | 'outbound'
+    | 'rag'
+    | 'draft'
+    | 'push'
+    | 'click_ok'
+    | 'click_fail'
+    | 'fill_only'
+    | 'warn'
+    | 'error';
+
+interface TerminalLogDetails {
+    customer?: string;
+    platform?: string;
+    riskLevel?: string;
+    allowAutoSend?: boolean;
+    denyReason?: string;
+    ragHits?: number;
+    clicked?: boolean;
+    method?: string;
+    duplicated?: boolean;
+    userMessage?: string;
+    content?: string;
+    ragPreview?: string[];
+}
+
+function paint(color: string, text: string) {
     return `${color}${text}${ansi.reset}`;
 }
 
-function oneLine(text, max = 160) {
+function oneLine(text: unknown, max = 160) {
     const normalized = String(text ?? '').replace(/\s+/g, ' ').trim();
     if (normalized.length <= max)
         return normalized;
@@ -33,8 +60,10 @@ function oneLine(text, max = 160) {
 /**
  * 打印带颜色的业务事件。走 stdout，会被 run-all 的 [api] 前缀接住。
  */
-export function terminalLog(event, details = {}) {
-    const palette = {
+export function terminalLog(event: TerminalLogEvent, details: TerminalLogDetails = {}) {
+    const palette: Record<TerminalLogEvent, string> = {
+        inbound: ansi.cyan,
+        outbound: ansi.green,
         rag: ansi.cyan,
         draft: ansi.magenta,
         push: ansi.blue,
@@ -45,7 +74,9 @@ export function terminalLog(event, details = {}) {
         error: ansi.red
     };
     const color = palette[event] ?? ansi.white;
-    const titleMap = {
+    const titleMap: Record<TerminalLogEvent, string> = {
+        inbound: '收到消息',
+        outbound: '确认已发送',
         rag: '知识库检索',
         draft: 'AI 草稿',
         push: '推送插件',
@@ -63,6 +94,8 @@ export function terminalLog(event, details = {}) {
         parts.push(paint(ansi.dim, `客户=${oneLine(details.customer, 40)}`));
     if (details.platform)
         parts.push(paint(ansi.dim, `平台=${details.platform}`));
+    if (details.duplicated != null)
+        parts.push(paint(details.duplicated ? ansi.yellow : ansi.green, details.duplicated ? '重复=是' : '新消息'));
     if (details.riskLevel)
         parts.push(paint(details.riskLevel === 'low' ? ansi.green : ansi.yellow, `风险=${details.riskLevel}`));
     if (details.allowAutoSend != null)
@@ -79,8 +112,10 @@ export function terminalLog(event, details = {}) {
     console.log(parts.join(' '));
     if (details.userMessage)
         console.log(paint(ansi.dim, `  问> ${oneLine(details.userMessage)}`));
-    if (details.content)
+    if (details.content && event !== 'inbound')
         console.log(paint(color, `  答> ${oneLine(details.content)}`));
+    if (details.content && event === 'inbound')
+        console.log(paint(color, `  问> ${oneLine(details.content)}`));
     if (Array.isArray(details.ragPreview) && details.ragPreview.length > 0) {
         for (const [index, item] of details.ragPreview.entries())
             console.log(paint(ansi.cyan, `  证${index + 1}> ${oneLine(item, 120)}`));

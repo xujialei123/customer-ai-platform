@@ -19,19 +19,78 @@ export class MessageService {
         if (existed) {
             return { conversation, message: existed, duplicated: true };
         }
-        const saved = await prisma.message.create({
-            data: {
-                id: message.id,
-                conversationId: conversation.id,
-                platform: message.platform,
-                direction: 'inbound',
-                messageType: message.messageType,
-                content: message.content,
-                raw: message.raw
-            }
-        });
+        // 内容短时去重：扩展 ID 抖动时，同一会话同一正文会带着新 id 反复入库。
+        // 若近 10 分钟内已有同正文入站，且仍在处理中或已有草稿，则视为重复，不再入队。
+        const softDuplicate = await this.findSoftDuplicateInbound(conversation.id, message.content);
+        if (softDuplicate)
+            return { conversation, message: softDuplicate, duplicated: true };
+        let saved;
+        try {
+            saved = await prisma.message.create({
+                data: {
+                    id: message.id,
+                    conversationId: conversation.id,
+                    platform: message.platform,
+                    direction: 'inbound',
+                    messageType: message.messageType,
+                    content: message.content,
+                    raw: message.raw,
+                    // 保留平台时间，消息排序不能被网络延迟或页面回扫时间替代。
+                    createdAt: this.parseCreatedAt(message.createdAt)
+                }
+            });
+        }
+        catch (error) {
+            // “先查再写”无法阻止两个并发回调同时通过查询；唯一键冲突时按重复消息返回，而不是把平台重试变成 500。
+            if (error?.code !== 'P2002')
+                throw error;
+            const concurrent = await prisma.message.findUnique({ where: { id: message.id } });
+            if (!concurrent)
+                throw error;
+            return { conversation, message: concurrent, duplicated: true };
+        }
         await this.refreshConversationSummary(conversation.id);
         return { conversation, message: saved, duplicated: false };
+    }
+    /**
+     * 查找「同会话同正文」的近期入站，用于抵消扩展 messageId 不稳定造成的假新消息。
+     * 客户短时间真心连发同一句（如两次你好）仍允许：仅在已有草稿/仍在处理窗口时拦截。
+     */
+    async findSoftDuplicateInbound(conversationId, content, withinMs = 10 * 60 * 1000) {
+        const normalized = String(content ?? '').trim();
+        if (!normalized)
+            return null;
+        const recent = await prisma.message.findFirst({
+            where: {
+                conversationId,
+                direction: 'inbound',
+                content: normalized,
+                createdAt: { gte: new Date(Date.now() - withinMs) }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        if (!recent)
+            return null;
+        const draft = await prisma.replyDraft.findFirst({
+            where: {
+                messageId: recent.id,
+                status: { in: ['pending', 'approved', 'dispatching', 'sent'] }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        const ageMs = Date.now() - new Date(recent.createdAt).getTime();
+        if (draft?.status === 'sent') {
+            // 已完整回复后，允许顾客稍后再发同一句；仅拦截发送后短窗口内的 ID 抖动重提。
+            if (ageMs >= 0 && ageMs < 90 * 1000)
+                return recent;
+            return null;
+        }
+        if (draft)
+            return recent;
+        // 草稿尚未写出（RAG/OpenClaw 仍在跑）时也拦截，避免并发双开 Worker。
+        if (ageMs >= 0 && ageMs < 5 * 60 * 1000)
+            return recent;
+        return null;
     }
     // 保存人工或 RPA 已实际发送到平台的消息，使下一轮 OpenClaw 能看到客服已经说过什么。
     async saveOutboundMessage(message) {
@@ -39,21 +98,33 @@ export class MessageService {
         const existed = await prisma.message.findUnique({ where: { id: message.id } });
         if (existed)
             return { conversation, message: existed, duplicated: true };
-        const saved = await prisma.message.create({
-            data: {
-                id: message.id,
-                conversationId: conversation.id,
-                platform: message.platform,
-                direction: 'outbound',
-                messageType: message.messageType ?? 'text',
-                content: message.content,
-                raw: message.raw ?? message,
-                aiGenerated: Boolean(message.aiGenerated)
-            }
-        });
+        let saved;
+        try {
+            saved = await prisma.message.create({
+                data: {
+                    id: message.id,
+                    conversationId: conversation.id,
+                    platform: message.platform,
+                    direction: 'outbound',
+                    messageType: message.messageType ?? 'text',
+                    content: message.content,
+                    raw: message.raw ?? message,
+                    aiGenerated: Boolean(message.aiGenerated),
+                    createdAt: this.parseCreatedAt(message.createdAt)
+                }
+            });
+        }
+        catch (error) {
+            if (error?.code !== 'P2002')
+                throw error;
+            const concurrent = await prisma.message.findUnique({ where: { id: message.id } });
+            if (!concurrent)
+                throw error;
+            return { conversation, message: concurrent, duplicated: true };
+        }
         // 页面观察到相同内容已经发出时，把对应待审核草稿标记 sent，避免再次回填。
         const matchingDraft = await prisma.replyDraft.findFirst({
-            where: { conversationId: conversation.id, content: message.content, status: { in: ['pending', 'approved'] } },
+            where: { conversationId: conversation.id, content: message.content, status: { in: ['pending', 'approved', 'dispatching'] } },
             orderBy: { createdAt: 'desc' }
         });
         if (matchingDraft) {
@@ -61,6 +132,12 @@ export class MessageService {
         }
         await this.refreshConversationSummary(conversation.id);
         return { conversation, message: saved, duplicated: false };
+    }
+    parseCreatedAt(value) {
+        if (!value)
+            return undefined;
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? undefined : parsed;
     }
     async getRecentHistory(conversationId, limit = 12, excludeMessageId) {
         // 当前问题会单独传给模型，因此从历史中排除，避免同一句重复出现造成模型误判。

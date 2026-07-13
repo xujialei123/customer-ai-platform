@@ -74,7 +74,8 @@ export async function replyDraftRoutes(app) {
                 const outboundTime = new Date(item.createdAt).getTime();
                 return outboundTime >= inboundTime && String(item.content ?? '').trim() === draftContent;
             });
-            const alreadyReplied = sentDraftMessageIds.has(draft.messageId) || contentAlreadySent;
+            const alreadyReplied = sentDraftMessageIds.has(draft.messageId)
+                || contentAlreadySent;
             return {
                 id: draft.id,
                 messageId: draft.messageId,
@@ -132,5 +133,16 @@ export async function replyDraftRoutes(app) {
             data: { status: 'sent' }
         });
         return reply.send({ ok: true, draft });
+    });
+    app.post('/reply-drafts/:id/mark-dispatched', async (request, reply) => {
+        const { id } = request.params;
+        // 点击成功只代表浏览器完成了发送动作，不代表平台已经接收；页面观察到 outbound 后才由 MessageService 标记 sent。
+        const result = await prisma.replyDraft.updateMany({
+            where: { id, status: { in: ['pending', 'approved'] } },
+            data: { status: 'dispatching' }
+        });
+        if (result.count === 0)
+            return reply.code(409).send({ ok: false, error: '草稿不存在或当前状态不可发送' });
+        return reply.send({ ok: true, status: 'dispatching' });
     });
 }

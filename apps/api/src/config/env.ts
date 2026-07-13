@@ -82,21 +82,49 @@ const envSchema = z.object({
     AUTO_REPLY_ENABLED: booleanString.default(false),
     RPA_AUTO_SEND_ENABLED: booleanString.default(false),
     // 真实美团灰度时只允许指定客户进入 RPA 链路，避免线上测试误处理非测试顾客。
-    MEITUAN_RPA_ALLOWED_CUSTOMERS: z.string().optional().default('')
+    MEITUAN_RPA_ALLOWED_CUSTOMERS: z.string().optional().default(''),
+    // 真实抖音来客灰度时只允许指定客户进入 RPA 链路；留空表示不过滤。
+    DOUYIN_RPA_ALLOWED_CUSTOMERS: z.string().optional().default('')
 });
 const parsedEnv = envSchema.parse(process.env);
-function resolveOpenClawToken() {
-    if (!parsedEnv.OPENCLAW_TOKEN_FILE)
-        return parsedEnv.OPENCLAW_TOKEN;
-    const tokenPath = isAbsolute(parsedEnv.OPENCLAW_TOKEN_FILE)
-        ? parsedEnv.OPENCLAW_TOKEN_FILE
-        : resolve(runtimeRoot, parsedEnv.OPENCLAW_TOKEN_FILE);
-    // 便携版会自行生成并维护 token；项目只读取，不复制、不修改，也不把内容写入日志。
-    if (!existsSync(tokenPath))
-        return parsedEnv.OPENCLAW_TOKEN;
-    return readFileSync(tokenPath, 'utf-8').trim();
+
+/**
+ * 便携包固定布局：包根目录下的 openclaw/。
+ * 未配置环境变量时按相对路径自动发现，避免交付后还要手写绝对路径。
+ * 开发机若 OpenClaw 在项目外，仍可用 OPENCLAW_PORTABLE_ROOT 覆盖。
+ */
+function resolveOpenClawPortableRoot() {
+    const configured = String(parsedEnv.OPENCLAW_PORTABLE_ROOT ?? '').trim();
+    if (configured) {
+        return isAbsolute(configured) ? configured : resolve(runtimeRoot, configured);
+    }
+    const bundled = resolve(runtimeRoot, 'openclaw');
+    if (existsSync(resolve(bundled, 'Start-OpenClaw.ps1')))
+        return bundled;
+    return '';
 }
+
+function resolveOpenClawTokenFile(portableRoot) {
+    const configured = String(parsedEnv.OPENCLAW_TOKEN_FILE ?? '').trim();
+    if (configured)
+        return isAbsolute(configured) ? configured : resolve(runtimeRoot, configured);
+    if (!portableRoot)
+        return '';
+    return resolve(portableRoot, 'data', '.openclaw', 'gateway-token.txt');
+}
+
+function resolveOpenClawToken(tokenFile) {
+    // 便携版会自行生成并维护 token；项目只读取，不复制、不修改，也不把内容写入日志。
+    if (tokenFile && existsSync(tokenFile))
+        return readFileSync(tokenFile, 'utf-8').trim();
+    return parsedEnv.OPENCLAW_TOKEN;
+}
+
+const openClawPortableRoot = resolveOpenClawPortableRoot();
+const openClawTokenFile = resolveOpenClawTokenFile(openClawPortableRoot);
 export const env = {
     ...parsedEnv,
-    OPENCLAW_TOKEN: resolveOpenClawToken()
+    OPENCLAW_PORTABLE_ROOT: openClawPortableRoot,
+    OPENCLAW_TOKEN_FILE: openClawTokenFile,
+    OPENCLAW_TOKEN: resolveOpenClawToken(openClawTokenFile)
 };

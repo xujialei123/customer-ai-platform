@@ -39,7 +39,7 @@ export class HybridRetriever {
     const embedMs = Date.now() - embedStarted;
     const merged = new Map<string, RetrievalCandidate>();
     // 多路向量检索并行，避免串行 await 放大延迟。
-    const vectorHitGroups = await Promise.all(embeddings.map((embedding) => this.store.vectorSearch(embedding, {
+    const vectorHitGroups = await Promise.all(embeddings.map((embedding: number[]) => this.store.vectorSearch(embedding, {
       platform: input.platform,
       shopId: input.shopId,
       // 多意图问题可能同时需要套餐与退款卡片，分类只参与加权，不能在召回阶段硬排除。

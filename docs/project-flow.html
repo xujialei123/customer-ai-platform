@@ -66,10 +66,10 @@
   <div class="layout">
     <nav>
       <strong>流程目录</strong>
-      <a href="#position">项目定位</a><a href="#services">启动与服务</a><a href="#knowledge">知识库流程</a>
+      <a href="#position">项目定位</a><a href="code-review-guide.html">代码梳理指南 ↗</a><a href="#services">启动与服务</a><a href="#knowledge">知识库流程</a>
       <a href="#message">消息回复流程</a><a href="#retrieval">Hybrid RAG</a><a href="#rpa">RPA 多会话</a>
       <a href="#context">上下文与去重</a><a href="#orders">订单查询</a><a href="#safety">风控规则</a>
-      <a href="#storage">数据存储</a><a href="#files">文件职责索引</a><a href="#operation">操作顺序</a><a href="#debug">排障顺序</a><a href="#limits">当前边界</a>
+      <a href="#storage">数据存储</a><a href="#files">文件职责索引</a><a href="#operation">操作顺序</a><a href="deployment-guide.html">部署手册 ↗</a><a href="#debug">排障顺序</a><a href="#limits">当前边界</a>
     </nav>
     <main>
       <section id="position">
@@ -78,7 +78,7 @@
         <div class="grid" style="margin-top:16px">
           <div class="card"><span class="tag green">官方接口</span><h3>企业微信</h3><p>使用官方 Webhook/API 接收和发送消息，默认关闭自动发送。</p></div>
           <div class="card"><span class="tag amber">RPA Adapter</span><h3>美团到店</h3><p>Chrome 扩展监听已登录页面 DOM，通过本地 WebSocket 与 API 通信。</p></div>
-          <div class="card"><span class="tag amber">RPA Adapter</span><h3>抖音来客</h3><p>当前保留 RPA 适配边界，不编造未确认的官方客服接口。</p></div>
+          <div class="card"><span class="tag amber">RPA Adapter</span><h3>抖音来客</h3><p>与美团共用同一 Chrome 扩展，按 URL 自动识别平台；默认只生成建议回复，不自动发送。</p></div>
         </div>
       </section>
 
@@ -124,7 +124,7 @@
 
       <section id="rpa">
         <h2>六、Chrome 插件多会话 RPA</h2>
-        <ol><li>插件通过 <code>ws://127.0.0.1:3001/rpa/extension/ws</code> 连接 API。</li><li>监听左侧未读会话并串行点击切换客户，默认兼容 <code>.chat-list-item-wrapper</code>、<code>.chat-list-item</code> 和 <code>.virtual-list-item</code>。</li><li>美团经营宝未读数字按 <code>.mtd-badge-text.mtd-badge-position</code> 判断，例如角标文本 <code>1</code>；避免使用过宽的 <code>.mtd-badge</code> 容器误判。</li><li>读取真实 <code>shopId + conversationId + messageId</code>。</li><li>线上灰度可通过 <code>MEITUAN_RPA_ALLOWED_CUSTOMERS</code> 限定只处理指定测试客户；入站、出站、会话注册和草稿查询都会服务端兜底校验。</li><li>当前页面若停在非白名单客户，插件会清理该 frame 的旧会话映射并释放调度锁，继续寻找白名单未读客户。</li><li>只用该会话最新一条未读消息触发回复，避免连续拆句生成多份回答。</li><li>最多等待 120 秒，草稿返回后再次校验当前门店和客户。</li><li>低风险草稿若暂未满足自动点击条件，会先回填输入框；美团白名单灰度会话在 low 风险、开关已开启、连接后新生成且通过冷却时点击页面发送按钮。</li><li>页面观察到 outbound 后，将对应 ReplyDraft 标记为 sent。</li></ol>
+        <ol><li>插件通过 <code>ws://127.0.0.1:3001/rpa/extension/ws</code> 连接 API；同一扩展可同时桥接美团经营宝与抖音来客，各开标签页独立运行。</li><li>配置按平台分别保存在 <code>platformProfiles.meituan</code> / <code>platformProfiles.douyin</code>；弹窗会根据当前标签页 URL 读写对应平台选择器。</li><li>美团左侧未读兼容 <code>.chat-list-item-wrapper</code>、<code>.chat-list-item</code> 和 <code>.virtual-list-item</code>；未读角标按 <code>.mtd-badge-text.mtd-badge-position</code> 判断。</li><li>抖音左侧未读使用 <code>#list-container [class*="contactCard-"]</code> 与角标数字兜底；「预警通知」等系统会话不进入 AI 回复，检测到客户未读时优先自动切换。</li><li>抖音仅在「当前咨询」Tab 下扫描未读、切换会话与自动回复；切到「历史咨询」时扩展暂停 RPA 并清空 frame 会话，避免对历史客户重复发送。</li><li>抖音聊天区 loading/占位时不读消息；发送前等待输入框与发送按钮就绪，点击失败时网关才重推草稿。</li><li>读取真实 <code>shopId + conversationId + messageId</code>；抖音 <code>shopId</code> 优先取 URL 的 <code>lifeAccountId</code>。</li><li>线上灰度可通过配置页或 <code>MEITUAN_RPA_ALLOWED_CUSTOMERS</code> / <code>DOUYIN_RPA_ALLOWED_CUSTOMERS</code> 限定测试客户；<strong>白名单为空表示该平台全部客户可进入 RPA 链路</strong>。引导页 <code>/guide</code> 可在线编辑并立即同步到已连接插件。</li><li>服务端会再次校验白名单和本轮 <code>expectedMessageId</code>；插件传来的开关不能单独取得自动发送权限。</li><li>只用该会话最新一条未读消息触发回复，避免连续拆句生成多份回答。</li><li>最多等待 120 秒，草稿返回后再次校验当前门店和客户。</li><li>低风险草稿若暂未满足自动点击条件，会先回填输入框；白名单灰度会话在 low 风险、双端开关已开启、连接后新生成且通过冷却时点击页面发送按钮。</li><li>点击成功先把草稿标记为 <code>dispatching</code>；只有页面观察到相同会话的 outbound 后才标记 <code>sent</code>，避免“点到按钮但平台未接收”被误记为成功。</li></ol>
         <div class="notice">Mock 自动消息使用 30–70 秒随机空档；最近 10 条问题不重复，且不会继续向已有未读积压的客户生成消息。Mock 能力不能等同于真实平台生产稳定性。</div>
       </section>
 
@@ -132,7 +132,7 @@
         <h2>七、上下文、去重与草稿关联</h2>
         <div class="grid two">
           <div class="card"><h3>会话隔离键</h3><p><code>platform + shopId + conversationId + customerId</code>。不能使用昵称或页面标题作为生产会话标识。</p></div>
-          <div class="card"><h3>消息与草稿</h3><p>平台 messageId 做第一层去重，数据库做第二层去重。自动模式只接收当前浏览器实际提交 messageId 对应的草稿，历史 pending 不得重放。</p></div>
+          <div class="card"><h3>消息与草稿</h3><p>平台 messageId 做第一层去重；同会话同正文在处理中或刚发送后会短时内容去重，抵消抖音虚拟列表 ID 抖动。自动模式只推送 <code>expectedMessageIds</code> 匹配的草稿，禁止回放历史 pending。</p></div>
           <div class="card"><h3>历史上下文</h3><p>近期消息直接提供给 OpenClaw，较早消息写入数据库摘要；订单实时状态不进入长期摘要。</p></div>
           <div class="card"><h3>发送确认</h3><p>只有商家消息真实出现在页面 DOM 后才记录 outbound，并关闭相同会话、相同内容的待发送草稿。</p></div>
         </div>
@@ -176,7 +176,8 @@
         <ol><li>执行 <code>pnpm dev</code> 并确认 Docker、OpenClaw、3001、3100、8787 正常。</li><li>打开 <code>http://127.0.0.1:8787/kb-admin</code> 上传并解析文件。</li><li>点击文件“编译”，审核 Wiki 和 Knowledge Cards。</li><li>按需设置卡片平台、门店、分类、关键词和优先级。</li><li>在 <code>chrome://extensions</code> 重新加载修改后的插件。</li><li>开启页面监听和自动处理未读；确认安全后再单独开启自动发送。</li></ol>
         <div class="grid two" style="margin-top:16px">
           <div class="card"><h3>开发启动</h3><p><code>pnpm dev</code> 会启动 API、RAG、Mock 页面，并按扩展模式等待 Chrome 插件连接。只有设置 <code>RPA_MOCK_MODE=playwright</code> 时才使用旧 Playwright watcher。</p></div>
-          <div class="card"><h3>Windows 便携交付</h3><p><code>pnpm package:windows</code> 会生成一体化目录包，包含生产构建、干净 OpenClaw、Chrome 扩展、文档和启停脚本。客户双击 <code>Start-Customer-AI.bat</code> 后自动启动 Docker、OpenClaw、RAG 和 API。</p></div>
+          <div class="card"><h3>Windows 便携交付</h3><p><code>pnpm package:windows</code> 会生成一体化目录包。客户双击 <code>Start-Customer-AI.bat</code> 后自动启动 Docker、OpenClaw、RAG 和 API，并打开 <code>http://127.0.0.1:3001/guide</code> 配置引导页。OpenClaw 固定在包内 <code>openclaw/</code>，无需在 <code>.env</code> 填写便携路径。</p></div>
+          <div class="card"><h3>完整部署手册</h3><p>开发、便携交付、生产基线、灰度上线、验收、回滚和备份步骤见 <a href="deployment-guide.html">部署与上线手册</a>。</p></div>
           <div class="card"><h3>首次客户配置</h3><p>客服电脑仍需安装 Docker Desktop 和 Chrome；首次在 OpenClaw 配置模型 Key，并在 <code>chrome://extensions</code> 加载 <code>extensions\customer-ai-rpa</code>。真实平台登录态由客户自己的 Chrome 保存。</p></div>
           <div class="card"><h3>交付安全边界</h3><p>打包脚本不会复制本机 <code>.env</code>、OpenClaw <code>data</code>、Cookie、聊天记录或日志。自动发送默认关闭，需客户确认后在插件中单独开启。</p></div>
         </div>

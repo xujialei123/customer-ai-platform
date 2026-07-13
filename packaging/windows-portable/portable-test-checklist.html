@@ -1,0 +1,423 @@
+<!--
+  @file packaging/windows-portable/portable-test-checklist.html
+  @module 数据库、共享包与交付
+  @description 便携包打包完成后的验收测试清单（浏览器打开，可勾选进度）。
+  @see 联动关注：Start-Customer-AI.ps1、getting-started.html、deployment-guide.html。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>便携包交付测试清单</title>
+  <style>
+    :root {
+      --ink: #101828;
+      --muted: #667085;
+      --line: #e4e7ec;
+      --soft: #f8fafc;
+      --blue: #175cd3;
+      --blue-soft: #eff4ff;
+      --green: #067647;
+      --green-soft: #ecfdf3;
+      --amber: #b54708;
+      --amber-soft: #fffaeb;
+      --red: #b42318;
+      --shadow: 0 8px 24px rgba(16, 24, 40, 0.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #eef4ff 0%, var(--soft) 180px);
+    }
+    header {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 28px 24px 12px;
+    }
+    header h1 { margin: 0 0 8px; font-size: 28px; }
+    header p { margin: 0; color: var(--muted); line-height: 1.7; }
+    .progress {
+      margin-top: 16px;
+      height: 8px;
+      border-radius: 999px;
+      background: #eaecf0;
+      overflow: hidden;
+    }
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #175cd3, #12b76a);
+      transition: width .2s;
+    }
+    .progress-text { margin-top: 8px; font-size: 13px; color: var(--muted); }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px 48px;
+    }
+    section {
+      margin-top: 22px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    section h2 {
+      margin: 0;
+      padding: 14px 18px;
+      font-size: 17px;
+      border-bottom: 1px solid var(--line);
+      background: #fcfcfd;
+    }
+    .item {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      align-items: start;
+    }
+    .item:last-child { border-bottom: 0; }
+    .item input { margin-top: 4px; width: 18px; height: 18px; cursor: pointer; }
+    .item strong { display: block; margin-bottom: 4px; font-size: 15px; }
+    .item p, .item li { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+    .item ul { margin: 6px 0 0; padding-left: 18px; }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .tag.must { background: var(--red-soft); color: var(--red); }
+    .tag.rpa { background: var(--blue-soft); color: var(--blue); }
+    code {
+      border-radius: 6px;
+      padding: 2px 6px;
+      background: #eef2f6;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+    }
+    pre {
+      margin: 8px 0 0;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: #101828;
+      color: #e6edf7;
+      font-size: 12px;
+      line-height: 1.55;
+      overflow: auto;
+    }
+    .notice {
+      margin-top: 18px;
+      border-left: 4px solid var(--amber);
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: var(--amber-soft);
+      color: #7a2e0e;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+    .ok-box {
+      margin-top: 18px;
+      border-left: 4px solid var(--green);
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: var(--green-soft);
+      color: #054f31;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+    footer {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px 28px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    footer a { color: var(--blue); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>便携包交付测试清单</h1>
+    <p>开发环境美团/抖音自动切换与自动回复已通过后，按本清单在<strong>全新便携包目录</strong>上验收。勾选进度会保存在本机浏览器。</p>
+    <div class="progress"><span id="progressBar"></span></div>
+    <div class="progress-text" id="progressText">0 / 0 已完成</div>
+  </header>
+
+  <main>
+    <section id="pack">
+      <h2>一、打包前（开发机）</h2>
+      <label class="item" data-id="pack-1">
+        <input type="checkbox" />
+        <div>
+          <strong>停止开发进程 <span class="tag must">必做</span></strong>
+          <p>在运行 <code>pnpm dev</code> 的终端按 Ctrl+C。便携包启动脚本会占用 <code>3001</code> / <code>8787</code>，与开发环境冲突。</p>
+        </div>
+      </label>
+      <label class="item" data-id="pack-2">
+        <input type="checkbox" />
+        <div>
+          <strong>执行构建与打包</strong>
+          <pre>chcp 65001
+pnpm build:all
+pnpm package:windows</pre>
+          <p>输出目录：<code>release\Customer-AI-Portable-YYYYMMDD-HHmmss</code>。确认包内<strong>没有</strong>开发机 <code>.env</code>、Cookie、会话目录。</p>
+        </div>
+      </label>
+      <label class="item" data-id="pack-3">
+        <input type="checkbox" />
+        <div>
+          <strong>核对 BUILD-INFO 与扩展版本</strong>
+          <ul>
+            <li><code>BUILD-INFO.txt</code> 中 <code>ProjectEnvIncluded=false</code></li>
+            <li><code>extensions\customer-ai-rpa\manifest.json</code> 版本 ≥ <code>0.3.16</code></li>
+          </ul>
+        </div>
+      </label>
+    </section>
+
+    <section id="boot">
+      <h2>二、首次启动（便携包目录）</h2>
+      <label class="item" data-id="boot-1">
+        <input type="checkbox" />
+        <div>
+          <strong>Docker Desktop 已运行</strong>
+          <p>双击 <code>Start-Customer-AI.bat</code>，应自动打开 <code>http://127.0.0.1:3001/guide</code>。</p>
+        </div>
+      </label>
+      <label class="item" data-id="boot-2">
+        <input type="checkbox" />
+        <div>
+          <strong>Doctor 自检通过</strong>
+          <p>运行 <code>Doctor-Customer-AI.bat</code>：Portable Node / API / RAG / OpenClaw / Extension / Docker 均为 OK 或 HTTP 200。</p>
+        </div>
+      </label>
+      <label class="item" data-id="boot-3">
+        <input type="checkbox" />
+        <div>
+          <strong>引导页五项状态正常</strong>
+          <p>API、RAG、OpenClaw 绿点；加载扩展后「Chrome 插件」变绿。默认 <code>AUTO_REPLY_ENABLED=false</code>、<code>RPA_AUTO_SEND_ENABLED=false</code> 显示为未开启（安全默认）。</p>
+        </div>
+      </label>
+      <label class="item" data-id="boot-4">
+        <input type="checkbox" />
+        <div>
+          <strong>配置 OpenClaw 与知识库</strong>
+          <ul>
+            <li>填写便携包 <code>.env</code> 或 OpenClaw 配置页的模型 Key</li>
+            <li>打开 <code>http://127.0.0.1:8787/kb-admin</code> 上传/编译门店知识库</li>
+            <li>在 <code>/guide</code> 配置美团/抖音白名单（灰度期建议只填测试客户）</li>
+          </ul>
+        </div>
+      </label>
+      <label class="item" data-id="boot-5">
+        <input type="checkbox" />
+        <div>
+          <strong>加载 Chrome 扩展</strong>
+          <p><code>chrome://extensions</code> → 开发者模式 → 加载 <code>extensions\customer-ai-rpa</code>。美团经营宝、抖音来客各开一个标签页登录。</p>
+        </div>
+      </label>
+    </section>
+
+    <section id="draft">
+      <h2>三、草稿模式（不自动发送）</h2>
+      <label class="item" data-id="draft-1">
+        <input type="checkbox" />
+        <div>
+          <strong>插件：监听开启，自动发送关闭</strong>
+          <p>勾选「启用页面监听」「自动处理未读会话」；<strong>不要</strong>勾选「允许自动点击发送」。插件应显示「已连接本地服务」。</p>
+        </div>
+      </label>
+      <label class="item" data-id="draft-2">
+        <input type="checkbox" />
+        <div>
+          <strong>美团：未读切换 + 草稿回填 <span class="tag rpa">美团</span></strong>
+          <ul>
+            <li>测试客户发来新消息 → 左侧自动切到该客户</li>
+            <li>终端出现 <code>[RPA] 收到消息</code>、<code>AI 草稿</code></li>
+            <li>输入框出现建议回复（黄色「仅回填」日志）</li>
+            <li>不会自动点发送</li>
+          </ul>
+        </div>
+      </label>
+      <label class="item" data-id="draft-3">
+        <input type="checkbox" />
+        <div>
+          <strong>抖音：未读切换 + 草稿回填 <span class="tag rpa">抖音</span></strong>
+          <ul>
+            <li>保持在「当前咨询」Tab</li>
+            <li>未读客户自动切换，会话 ID 为客户昵称（不是「抖音来客」）</li>
+            <li>输入框回填草稿，不自动发送</li>
+          </ul>
+        </div>
+      </label>
+      <label class="item" data-id="draft-4">
+        <input type="checkbox" />
+        <div>
+          <strong>抖音历史咨询 Tab 不处理</strong>
+          <p>切到「历史咨询」→ 扩展状态提示暂停，不对历史客户扫描/回填/发送。</p>
+        </div>
+      </label>
+      <label class="item" data-id="draft-5">
+        <input type="checkbox" />
+        <div>
+          <strong>白名单外客户被忽略</strong>
+          <p>配置仅 1 个测试客户后，其他客户消息不入库、不回填。清空白名单后全部客户可进入链路。</p>
+        </div>
+      </label>
+    </section>
+
+    <section id="autosend">
+      <h2>四、自动发送灰度（测试客户）</h2>
+      <label class="item" data-id="send-1">
+        <input type="checkbox" />
+        <div>
+          <strong>开启服务端自动发送</strong>
+          <p>编辑便携包 <code>.env</code>：<code>RPA_AUTO_SEND_ENABLED=true</code>，重启 <code>Start-Customer-AI.bat</code>。引导页「RPA 自动发送」应变绿。</p>
+        </div>
+      </label>
+      <label class="item" data-id="send-2">
+        <input type="checkbox" />
+        <div>
+          <strong>插件勾选「允许自动点击发送」</strong>
+          <p>仅对白名单内测试客户生效。终端应出现 <code>推送插件</code> → <code>已点发送</code> → <code>确认已发送</code>。</p>
+        </div>
+      </label>
+      <label class="item" data-id="send-3">
+        <input type="checkbox" />
+        <div>
+          <strong>美团自动回复一条新消息 <span class="tag rpa">美团</span></strong>
+          <p>客户发新问题 → 自动切换 → 生成草稿 → 自动发送 → 聊天区出现客服气泡。草稿状态：<code>pending → dispatching → sent</code>。</p>
+        </div>
+      </label>
+      <label class="item" data-id="send-4">
+        <input type="checkbox" />
+        <div>
+          <strong>抖音自动回复一条新消息 <span class="tag rpa">抖音</span></strong>
+          <p>同上。确认不会把知识库内部规则原文发给客户（如「应先…不得猜测…」类句子）。</p>
+        </div>
+      </label>
+      <label class="item" data-id="send-5">
+        <input type="checkbox" />
+        <div>
+          <strong>同一条消息不重复回复</strong>
+          <p>已回复的问题不会再次自动发送；切换会话、刷新页面、未读角标残留时不应把旧问题再回一遍。</p>
+        </div>
+      </label>
+      <label class="item" data-id="send-6">
+        <input type="checkbox" />
+        <div>
+          <strong>高风险问题转人工</strong>
+          <p>发送「退款」「投诉」「赔偿」等 → 回复转人工话术，<strong>不</strong>自动承诺退款/赔偿。</p>
+        </div>
+      </label>
+    </section>
+
+    <section id="stress">
+      <h2>五、稳定性与恢复</h2>
+      <label class="item" data-id="stress-1">
+        <input type="checkbox" />
+        <div>
+          <strong>Stop → Start 重启后服务正常</strong>
+          <p><code>Stop-Customer-AI.bat</code> 后再 <code>Start-Customer-AI.bat</code>，健康检查与插件重连正常；历史消息不会批量重发。</p>
+        </div>
+      </label>
+      <label class="item" data-id="stress-2">
+        <input type="checkbox" />
+        <div>
+          <strong>扩展 Reload 后重连</strong>
+          <p>在 <code>chrome://extensions</code> 重新加载扩展 → WebSocket 重连 → 继续处理新未读。</p>
+        </div>
+      </label>
+      <label class="item" data-id="stress-3">
+        <input type="checkbox" />
+        <div>
+          <strong>双平台同时在线</strong>
+          <p>美团 + 抖音标签页同时打开，各自独立切换与回复，不串会话、不串 shopId。</p>
+        </div>
+      </label>
+      <label class="item" data-id="stress-4">
+        <input type="checkbox" />
+        <div>
+          <strong>日志与排障入口可用</strong>
+          <ul>
+            <li><code>http://127.0.0.1:3001/rpa/extension/status</code> 显示连接、白名单、listTab</li>
+            <li>业务日志在 API 终端/ <code>data\logs\api.out.log</code></li>
+            <li><code>docs\project-flow.html</code> 可本地打开</li>
+          </ul>
+        </div>
+      </label>
+    </section>
+
+    <div class="notice">
+      <strong>立即停发条件：</strong>串会话、重复发送、高风险自动承诺、知识库外编造、选择器大面积失效。先关闭插件「自动发送」和 <code>RPA_AUTO_SEND_ENABLED=false</code>，再排查。
+    </div>
+    <div class="ok-box" id="passBox" hidden>
+      <strong>全部必测项已通过。</strong> 可将该便携包目录交付客户机；交付前再次确认未包含开发密钥与客户 Cookie。
+    </div>
+  </main>
+
+  <footer>
+    相关文档：<a href="getting-started.html">配置引导</a> ·
+    <a href="../docs/deployment-guide.html">部署手册</a> ·
+    <a href="../docs/project-flow.html">项目流程</a> ·
+    <a href="http://127.0.0.1:3001/guide">在线引导页</a>
+  </footer>
+
+  <script>
+    const STORAGE_KEY = 'customer-ai-portable-test-v1';
+    const REQUIRED = new Set([
+      'pack-1', 'pack-2', 'pack-3',
+      'boot-1', 'boot-2', 'boot-3', 'boot-4', 'boot-5',
+      'draft-2', 'draft-3', 'draft-4',
+      'send-3', 'send-4', 'send-5'
+    ]);
+
+    function loadState() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+      catch { return {}; }
+    }
+
+    function saveState(state) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function refreshProgress() {
+      const items = [...document.querySelectorAll('.item[data-id]')];
+      const done = items.filter((el) => el.querySelector('input')?.checked).length;
+      const total = items.length;
+      const pct = total ? Math.round((done / total) * 100) : 0;
+      document.getElementById('progressBar').style.width = pct + '%';
+      document.getElementById('progressText').textContent = done + ' / ' + total + ' 已完成（' + pct + '%）';
+      const requiredDone = [...REQUIRED].every((id) => {
+        const el = document.querySelector('.item[data-id="' + id + '"] input');
+        return el && el.checked;
+      });
+      document.getElementById('passBox').hidden = !requiredDone;
+    }
+
+    const state = loadState();
+    document.querySelectorAll('.item[data-id]').forEach((row) => {
+      const id = row.dataset.id;
+      const input = row.querySelector('input');
+      input.checked = Boolean(state[id]);
+      input.addEventListener('change', () => {
+        state[id] = input.checked;
+        saveState(state);
+        refreshProgress();
+      });
+    });
+    refreshProgress();
+  </script>
+</body>
+</html>

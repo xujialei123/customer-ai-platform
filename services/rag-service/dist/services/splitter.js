@@ -1,4 +1,10 @@
 // @ts-nocheck
+/**
+ * @file services/rag-service/src/services/splitter.ts
+ * @module RAG Service 兼容层
+ * @description 旧 Chunk 机械切分逻辑。
+ * @see 联动关注：卡片生成不能退化为机械切片。
+ */
 import { nanoid } from 'nanoid';
 function splitLongParagraph(text, chunkSize, overlap) {
     // 超长段落使用重叠窗口，避免关键句恰好位于切片边界而丢失上下文。

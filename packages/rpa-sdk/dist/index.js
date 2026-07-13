@@ -1,3 +1,9 @@
+/**
+ * @file packages/rpa-sdk/src/index.ts
+ * @module 数据库、共享包与交付
+ * @description RPA SDK：askRagService、createMessageHash 等辅助函数。
+ * @see 联动关注：Watcher 和 Chrome 插件 inbound 链路。
+ */
 import { createHash } from 'node:crypto';
 export function createMessageHash(platform, shopId, sessionId, text) {
     // RPA 去重必须使用稳定 hash，避免直接拼接文本时出现分隔符冲突或泄露完整用户问题。

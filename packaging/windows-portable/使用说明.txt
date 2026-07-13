@@ -8,17 +8,19 @@
 
 首次使用：
 1. 安装并启动 Docker Desktop。
-2. 双击 Start-Customer-AI.bat。
-3. 在 OpenClaw 配置页填写客户自己的模型 API Key。
+2. 双击 Start-Customer-AI.bat，浏览器会自动打开配置引导页 http://127.0.0.1:3001/guide 。
+3. 按引导页步骤填写 .env、OpenClaw 模型 Key、加载 Chrome 扩展并上传知识库。
 4. 打开 Chrome 扩展管理页 chrome://extensions，开启开发者模式。
 5. 选择“加载已解压的扩展程序”，选择 extensions\customer-ai-rpa。
 6. 在客服平台页面中人工登录一次，插件会通过本地 WebSocket 连接服务。
-7. 打开知识库页面上传门店资料。
+7. 白名单客户试发消息，确认自动切换和自动发送正常后再正式使用。
 
 日常使用：
-- 启动：Start-Customer-AI.bat
+- 启动：Start-Customer-AI.bat（自动打开配置引导页）
 - 停止：Stop-Customer-AI.bat
 - 检查：Doctor-Customer-AI.bat
+- 配置引导：http://127.0.0.1:3001/guide
+- 打包后测试清单：portable-test-checklist.html（浏览器打开，可勾选进度）
 - 插件状态：http://127.0.0.1:3001/rpa/extension/status
 - 项目流程：docs\project-flow.html
 

@@ -7,6 +7,9 @@
 if (!globalThis.__customerAiRpaInjected) {
 globalThis.__customerAiRpaInjected = true;
 const seenMessages = new Set();
+const submittedInboundIds = new Set();
+/** 已提交过的「会话+方向+正文」指纹，防止 ID 抖动时未读角标把旧消息再提一次。 */
+const submittedInboundContents = new Set();
 const initializedConversations = new Set();
 let observer;
 let scanTimer;
@@ -99,10 +102,93 @@ function textOf(element, selector) {
   return (selector ? element.querySelector(selector)?.textContent : element.textContent)?.trim() ?? '';
 }
 
-function createStableId(conversationId, direction, content, index) {
+function createStableId(conversationId, direction, content, index, platform, element, occurrence = 1) {
   // 平台缺少 messageId 时才使用兜底 ID；数据库仍会做第二层去重。
-  // 页面未暴露消息 ID 时使用会话、文本和位置组成兜底 ID，服务端仍会进行数据库二次去重。
+  if (platform === 'douyin') {
+    const explicit = element?.getAttribute?.('data-messageid') || element?.getAttribute?.('data-message-id');
+    if (explicit)
+      return explicit;
+    // 禁止用 data-index / 「刚刚」等易变时间：虚拟列表重排会让旧气泡变成新 ID，从而重复入队、重复回复。
+    // 同文案连发（如两次「你好」）用当前可见列表中的出现序号区分。
+    return `${conversationId}:${direction}:${occurrence}:${content.slice(0, 120)}`;
+  }
   return `${conversationId}:${direction}:${index}:${content}`;
+}
+
+function normalizeUnreadCount(raw) {
+  const count = Number.parseInt(String(raw ?? '').trim(), 10);
+  if (!Number.isFinite(count) || count <= 0 || count > 99)
+    return 0;
+  return count;
+}
+
+function isDouyinPlaceholderName(name) {
+  const normalized = normalizeConversationKey(name);
+  if (!normalized)
+    return true;
+  return /^(抖音来客|抖音|来客|客服工作台|消息列表)$/.test(normalized)
+    || /douyin/i.test(normalized);
+}
+
+function getDouyinSelectedListCustomerName(targetDocument) {
+  const cards = queryAllDeep(targetDocument, '#list-container [class*="contactCard-"]');
+  for (const card of cards) {
+    let node = card;
+    for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
+      const cls = String(node.className || '');
+      if (/(^|\s|-)(active|selected|current|checked)(-|\s|$)/i.test(cls)) {
+        const name = card.querySelector('[class*="uname-"]')?.textContent?.trim() || '';
+        if (name)
+          return name;
+      }
+    }
+  }
+  return '';
+}
+
+function readDouyinSession(targetDocument, settings, targetUrl) {
+  const url = new URL(targetUrl);
+  const accountId = url.searchParams.get('accountId') || '';
+  const groupId = url.searchParams.get('groupId') || url.searchParams.get('conGroupId') || '';
+  const lifeAccountId = url.searchParams.get('lifeAccountId') || '';
+  const customerName = resolveDouyinCustomerName(targetDocument, settings);
+  const urlConversationId = groupId || accountId || '';
+  // 顶部昵称优先；绝不能用 document.title（常为「抖音来客」）作为会话键，否则草稿永远路由不到客户。
+  const conversationId = customerName || urlConversationId;
+  const customerId = urlConversationId || customerName || '';
+  return {
+    platform: 'douyin',
+    shopId: lifeAccountId || settings.shopId || 'default-shop',
+    conversationId,
+    customerId,
+    customerName: customerName || undefined,
+    pageUrl: targetUrl
+  };
+}
+
+function readSession(targetDocument, settings, targetUrl) {
+  if (settings.platform === 'douyin')
+    return readDouyinSession(targetDocument, settings, targetUrl);
+  return readMeituanSession(targetDocument, settings, targetUrl);
+}
+
+async function resolveSettings(targetUrl) {
+  const stored = await chrome.storage.local.get();
+  const merged = globalThis.__customerAiPlatformProfiles?.mergePlatformSettings(stored, null, targetUrl || location.href);
+  return merged || stored;
+}
+
+function hasRealConversation(session) {
+  if (session.platform === 'douyin') {
+    if (!/life\.douyin\.com/i.test(session.pageUrl || ''))
+      return false;
+    if (isDouyinPlaceholderName(session.conversationId) && !/(?:groupId|accountId|conGroupId)=/i.test(session.pageUrl || ''))
+      return false;
+    return Boolean(session.customerName && !isDouyinPlaceholderName(session.customerName))
+      || Boolean(session.conversationId && !isDouyinPlaceholderName(session.conversationId) && /(?:groupId|accountId|conGroupId)=/i.test(session.pageUrl || ''));
+  }
+  return session.shopId !== 'default-shop'
+    && !['经营宝聊天页', '/dzim-workbench-pc/index.html'].includes(session.conversationId);
 }
 
 function readMeituanSession(targetDocument, settings, targetUrl) {
@@ -129,8 +215,11 @@ function readMeituanSession(targetDocument, settings, targetUrl) {
 
 function buildDomSnapshot() {
   // AI 只接收标签、稳定 class 和控件语义，不上传聊天正文、客户 ID、手机号或图片地址。
+  const platform = globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(location.href) || 'meituan';
   const nodes = [];
-  const candidateSelector = '.message-cell-container,.message-wrapper,.text-message,[contenteditable],button,.dzim-chat-input-send,.user-center,.userinfo-name-show,[lx-mv]';
+  const candidateSelector = platform === 'douyin'
+    ? '.chatd-message,.chatd-bubble,[class*="inputWrapper-"] textarea,button[class*="sendBtn-"],[class*="contactCard-"],[class*="uname-"]'
+    : '.message-cell-container,.message-wrapper,.text-message,[contenteditable],button,.dzim-chat-input-send,.user-center,.userinfo-name-show,[lx-mv]';
   for (const targetDocument of getAccessibleDocuments()) {
     for (const element of queryAllDeep(targetDocument, candidateSelector)) {
       nodes.push({
@@ -150,7 +239,7 @@ function buildDomSnapshot() {
     if (nodes.length >= 300)
       break;
   }
-  return { platform: 'meituan', nodes, counts: { documents: getAccessibleDocuments().length } };
+  return { platform, nodes, counts: { documents: getAccessibleDocuments().length } };
 }
 
 function validateAiSelectors(selectors) {
@@ -202,16 +291,34 @@ function collectDiagnostics(settings, targetDocument) {
     pageUrl: targetDocument.location?.href || location.href,
     frameTitle: targetDocument.title,
     configuredCounts: {
-      messageItems: settings.messageItemSelector ? queryAllDeep(targetDocument, settings.messageItemSelector).length : 0,
+      messageItems: settings.platform === 'douyin'
+        ? queryDouyinMessageItems(targetDocument, settings).length
+        : (settings.messageItemSelector ? queryAllDeep(targetDocument, settings.messageItemSelector).length : 0),
       messageTexts: settings.messageTextSelector ? queryAllDeep(targetDocument, settings.messageTextSelector).length : 0,
-      replyInputs: settings.replyInputSelector ? queryAllDeep(targetDocument, settings.replyInputSelector).length : 0,
+      replyInputs: settings.platform === 'douyin'
+        ? (queryDouyinReplyInput(targetDocument, settings) ? 1 : 0)
+        : (settings.replyInputSelector ? queryAllDeep(targetDocument, settings.replyInputSelector).length : 0),
       sendButtons: settings.sendButtonSelector ? queryAllDeep(targetDocument, settings.sendButtonSelector).length : 0
     },
     conversationCounts: {
-      // 这里不上传客户正文，只统计左侧列表是否可识别、是否存在未读、是否命中白名单，用来排查自动切换失败。
       items: conversationItems.length,
       unread: unreadConversationItems.length,
-      allowedUnread: unreadConversationItems.filter((item) => isAllowedConversation(settings, null, item)).length
+      allowedUnread: unreadConversationItems.filter((item) => isAllowedConversation(settings, null, item)).length,
+      needSwitch: Boolean(shouldSwitchToUnread(targetDocument, settings)),
+      replyReady: isReplyReady(targetDocument, settings),
+      chatReady: settings.platform === 'douyin' ? isDouyinChatReady(targetDocument, settings) : undefined,
+      chatLoading: settings.platform === 'douyin' ? isDouyinChatLoading(targetDocument) : undefined,
+      chatClosed: settings.platform === 'douyin' ? isDouyinChatClosed(targetDocument) : false,
+      centerCustomer: settings.platform === 'douyin'
+        ? getDouyinCenterCustomerName(targetDocument, settings, targetDocument.location?.href || location.href)
+        : undefined,
+      centerIsSystemSession: settings.platform === 'douyin'
+        ? isDouyinSystemSessionName(getDouyinCenterCustomerName(targetDocument, settings, targetDocument.location?.href || location.href))
+        : undefined,
+      cardUnreadCount: settings.platform === 'douyin'
+        ? getDouyinCardUnreadCountForSession(targetDocument, settings, readDouyinSession(targetDocument, settings, targetDocument.location?.href || location.href))
+        : undefined,
+      listTab: settings.platform === 'douyin' ? getDouyinListTabMode(targetDocument) : undefined
     },
     settingsState: {
       // 只暴露布尔状态，避免把白名单客户 ID 写进诊断日志。
@@ -227,24 +334,141 @@ function collectDiagnostics(settings, targetDocument) {
   };
 }
 
-function unreadCountOf(item, settings) {
-  // 平台角标可能只显示红点，也可能显示数字；红点按一条未读处理，避免整条会话永远遗漏。
-  const selector = settings.conversationUnreadSelector || '.mtd-badge-text.mtd-badge-position';
-  const badge = item.querySelector(selector);
-  if (!badge || badge.hidden)
-    return 0;
-  const style = getComputedStyle(badge);
-  const rect = badge.getBoundingClientRect();
-  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0)
-    return 0;
-  const explicitCount = Number(item.getAttribute('data-unread-count'));
-  if (Number.isFinite(explicitCount) && explicitCount > 0)
-    return explicitCount;
-  const textCount = Number.parseInt(badge.textContent?.trim() || '', 10);
-  return Number.isFinite(textCount) && textCount > 0 ? textCount : 1;
+function normalizeConversationKey(value) {
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
+    .trim();
 }
 
-function conversationIdOf(item) {
+function conversationIdsMatch(expected, actual, settings, session) {
+  if (!expected || !actual)
+    return expected === actual;
+  if (expected === actual)
+    return true;
+  if (settings?.platform !== 'douyin')
+    return false;
+  const left = normalizeConversationKey(expected);
+  const right = normalizeConversationKey(actual);
+  if (!left || !right)
+    return false;
+  if (left.includes(right) || right.includes(left))
+    return true;
+  const sessionName = normalizeConversationKey(session?.customerName);
+  return Boolean(sessionName) && (left.includes(sessionName) || sessionName.includes(left) || right.includes(sessionName) || sessionName.includes(right));
+}
+
+function sessionsMatch(expected, current, settings) {
+  if (!expected || !current)
+    return false;
+  if (expected.shopId && current.shopId && expected.shopId !== current.shopId)
+    return false;
+  if (settings?.platform === 'meituan') {
+    return Boolean(
+      (expected.conversationId && expected.conversationId === current.conversationId)
+      || (expected.customerId && expected.customerId === current.customerId)
+    );
+  }
+  return conversationIdsMatch(expected.conversationId, current.conversationId, settings, current)
+    || conversationIdsMatch(expected.customerName, current.customerName, settings, current)
+    || conversationIdsMatch(expected.customerName, current.conversationId, settings, current);
+}
+
+function conversationMatchesTask(session, task, settings) {
+  if (!task)
+    return false;
+  if (settings?.platform === 'meituan') {
+    const currentId = session.conversationId || session.customerId;
+    return Boolean(task.expectedConversationId) && task.expectedConversationId === currentId;
+  }
+  if (conversationIdsMatch(task.expectedConversationId, session.conversationId, settings, session))
+    return true;
+  if (task.expectedCustomerName)
+    return conversationIdsMatch(task.expectedCustomerName, session.customerName || session.conversationId, settings, session);
+  return false;
+}
+
+function unreadSelectorsOf(settings) {
+  const raw = settings.conversationUnreadSelector || '.mtd-badge-text.mtd-badge-position';
+  return raw.split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => item.replace(/^#list-container\s+/, ''));
+}
+
+function isDouyinSystemSessionName(name) {
+  const normalized = normalizeConversationKey(name);
+  if (!normalized)
+    return false;
+  return /预警通知|系统消息|系统通知|平台通知|官方通知|消息中心|通知中心/.test(normalized)
+    || /通知$/.test(normalized);
+}
+
+function douyinFallbackUnreadCount(item) {
+  // 只在角标节点上读数字，避免把 accountId 等大数字误判为未读数。
+  const selectors = '.life-im-pc-badge-text, [class*="badge-number-"], .life-im-pc-badge-sup-show, sup';
+  for (const node of item.querySelectorAll(selectors)) {
+    const count = normalizeUnreadCount(node.textContent);
+    if (!count)
+      continue;
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || rect.width > 36 || rect.height > 36)
+      continue;
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)
+      continue;
+    return count;
+  }
+  return 0;
+}
+
+function unreadCountOf(item, settings) {
+  // 平台角标可能只显示红点，也可能显示数字；红点按一条未读处理，避免整条会话永远遗漏。
+  for (const selector of unreadSelectorsOf(settings)) {
+    const badge = item.querySelector(selector);
+    if (!badge || badge.hidden)
+      continue;
+    const style = getComputedStyle(badge);
+    const rect = badge.getBoundingClientRect();
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0)
+      continue;
+    const explicitCount = normalizeUnreadCount(item.getAttribute('data-unread-count'));
+    if (explicitCount > 0)
+      return explicitCount;
+    const textCount = normalizeUnreadCount(badge.textContent);
+    return textCount > 0 ? textCount : 1;
+  }
+  if (settings?.platform === 'douyin') {
+    const badges = item.querySelectorAll('.life-im-pc-badge, [class*="badge-number-"]');
+    for (const badge of badges) {
+      const textCount = normalizeUnreadCount(badge.textContent);
+      if (textCount > 0)
+        return textCount;
+      const rect = badge.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0 && badge.querySelector('.life-im-pc-badge-text'))
+        return 1;
+    }
+    const badgeText = item.querySelector('.life-im-pc-badge-text');
+    const textCount = normalizeUnreadCount(badgeText?.textContent);
+    if (textCount > 0)
+      return textCount;
+    if (/用户催促/.test(item.textContent || ''))
+      return 1;
+    const fallback = douyinFallbackUnreadCount(item);
+    if (fallback > 0)
+      return fallback;
+  }
+  return 0;
+}
+
+function conversationIdOf(item, settings) {
+  if (settings?.platform === 'douyin') {
+    return item.querySelector('[class*="uname-"]')?.textContent?.trim()
+      || item.getAttribute('data-conversation-id')
+      || item.getAttribute('data-customer-id')
+      || item.getAttribute('data-user-id')
+      || '';
+  }
   return item.getAttribute('data-conversation-id')
     || item.getAttribute('data-customer-id')
     || item.getAttribute('data-user-id')
@@ -252,14 +476,33 @@ function conversationIdOf(item) {
     || '';
 }
 
+function getDouyinCardUnreadCountForSession(targetDocument, settings, session) {
+  const card = conversationItemsOf(targetDocument, settings).find((item) => {
+    const name = conversationIdOf(item, settings);
+    return conversationIdsMatch(name, session.customerName || session.conversationId, settings, session);
+  });
+  return card ? unreadCountOf(card, settings) : 0;
+}
+
+function getDouyinCenterCustomerName(targetDocument, settings, targetUrl) {
+  return getDouyinDomCustomerName(targetDocument, settings)
+    || readDouyinSession(targetDocument, settings, targetUrl).customerName
+    || '';
+}
+
 function conversationItemsOf(targetDocument, settings) {
-  // 真实经营宝左侧列表会在不同版本里使用 wrapper、item 或虚拟列表节点，默认同时兼容这些稳定 class。
-  const selector = settings.conversationItemSelector || '.chat-list-item-wrapper,.chat-list-item,.virtual-list-item';
+  if (settings.platform === 'douyin' && isDouyinHistoryTabActive(targetDocument))
+    return [];
+  const selector = settings.platform === 'douyin'
+    ? '#list-container > [class*="contactCard-"], #list-container [class*="contactCard-"]'
+    : (settings.conversationItemSelector || '.chat-list-item-wrapper,.chat-list-item,.virtual-list-item');
   return queryAllDeep(targetDocument, selector)
     .filter((item, index, all) => item.textContent?.trim() && all.findIndex((candidate) => candidate === item || candidate.contains(item)) === index);
 }
 
-function clickableConversationTarget(item) {
+function clickableConversationTarget(item, settings) {
+  if (settings?.platform === 'douyin')
+    return item.closest('[class*="contactCard-"]') || item;
   // 优先点击真正承载会话的节点；如果命中的是外层虚拟列表，则退回内部 item，保持与人工点击一致。
   return item.matches('.chat-list-item,.chat-list-item-wrapper')
     ? item
@@ -274,6 +517,7 @@ function allowedCustomersOf(settings) {
 }
 
 function isAllowedConversation(settings, session, conversationItem) {
+  // 白名单为空时放行全部客户；抖音/美团同一规则，由服务端配置页统一下发。
   const allowedCustomers = allowedCustomersOf(settings);
   if (!allowedCustomers.length)
     return true;
@@ -281,7 +525,7 @@ function isAllowedConversation(settings, session, conversationItem) {
     session?.conversationId,
     session?.customerId,
     session?.customerName,
-    conversationItem ? conversationIdOf(conversationItem) : '',
+    conversationItem ? conversationIdOf(conversationItem, settings) : '',
     conversationItem?.textContent?.trim()
   ].filter(Boolean).map(String);
   // 真实平台灰度只处理指定测试用户；左侧列表无法稳定读 userId 时允许文本包含测试 ID。
@@ -308,6 +552,23 @@ function clearConversationTask(reason) {
 }
 
 function dispatchEditableInput(input, content) {
+  if (input.tagName === 'TEXTAREA') {
+    const targetDocument = input.ownerDocument;
+    input.focus();
+    // React 受控 textarea 直接改 .value 不会更新内部状态，发送按钮可能一直 disabled。
+    const nativeSetter = Object.getOwnPropertyDescriptor(targetDocument.defaultView?.HTMLTextAreaElement?.prototype || HTMLTextAreaElement.prototype, 'value')?.set;
+    if (nativeSetter)
+      nativeSetter.call(input, content);
+    else
+      input.value = content;
+    for (const event of [
+      new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: content }),
+      new InputEvent('input', { bubbles: true, inputType: 'insertText', data: content }),
+      new Event('change', { bubbles: true })
+    ])
+      input.dispatchEvent(event);
+    return;
+  }
   // 经营宝的输入框是 contenteditable 的 pre，内部框架可能依赖 beforeinput/input/selectionchange。
   // 不能只改 textContent，否则页面视觉上或许变了，但发送按钮状态和框架模型未必同步。
   const targetDocument = input.ownerDocument;
@@ -328,6 +589,60 @@ function dispatchEditableInput(input, content) {
   ])
     input.dispatchEvent(event);
   targetDocument.dispatchEvent(new Event('selectionchange', { bubbles: true }));
+}
+
+function isDouyinSendButtonReady(targetDocument, settings) {
+  const button = resolveSendButton(targetDocument, settings.sendButtonSelector, settings);
+  return Boolean(button && !button.disabled && button.getAttribute('aria-disabled') !== 'true');
+}
+
+async function waitForDouyinSendReady(targetDocument, settings, input, timeoutMs = 4000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (isDouyinSendButtonReady(targetDocument, settings))
+      return true;
+    input.focus?.();
+    await sleep(180);
+  }
+  return isDouyinSendButtonReady(targetDocument, settings);
+}
+
+function releaseConversationTaskAfterDraft(expectedSession, settings, delayMs = 800) {
+  if (!conversationTask || !conversationMatchesTask(expectedSession, conversationTask, settings))
+    return;
+  clearTimeout(schedulerTimer);
+  conversationTask = null;
+  setTimeout(scanMessages, delayMs);
+}
+
+async function attemptAutoSend(input, targetDocument, settings) {
+  dismissSmartReplyOverlay(targetDocument);
+  let clicked = false;
+  let method = '';
+  for (let attempt = 0; attempt < 5 && !clicked; attempt += 1) {
+    if (settings.platform === 'douyin')
+      await waitForDouyinSendReady(targetDocument, settings, input, 1200);
+    clicked = clickSendControl(targetDocument, settings.sendButtonSelector, settings);
+    method = clicked ? 'send-button' : method;
+    if (!clicked) {
+      trySubmitByEnter(input);
+      clicked = clickSendControl(targetDocument, settings.sendButtonSelector, settings);
+      method = clicked ? 'enter+send-button' : 'enter-only';
+    }
+    if (!clicked)
+      await sleep(350);
+  }
+  if (clicked) {
+    setTimeout(() => {
+      const stillHasText = String(input.value ?? input.textContent ?? '').trim();
+      // 仅当输入框仍有内容时才补点一次，避免已成功发送后二次点击造成重复消息。
+      if (!stillHasText)
+        return;
+      dismissSmartReplyOverlay(targetDocument);
+      clickSendControl(targetDocument, settings.sendButtonSelector, settings);
+    }, 500);
+  }
+  return { clicked, method: method || (clicked ? 'send-button' : 'none') };
 }
 
 function dismissSmartReplyOverlay(targetDocument) {
@@ -354,27 +669,33 @@ function dismissSmartReplyOverlay(targetDocument) {
   return false;
 }
 
-function resolveSendButton(targetDocument, selector) {
-  const preferred = [
-    selector,
-    '.dzim-chat-input-send > button.send-button',
-    '.dzim-chat-input-send > button.dzim-button-primary',
-    '.dzim-chat-input-send button'
-  ].filter(Boolean);
+function resolveSendButton(targetDocument, selector, settings) {
+  const preferred = settings?.platform === 'douyin'
+    ? [
+        selector,
+        '[class*="inputWrapper-"] button[class*="sendBtn-"]',
+        '[class*="send-"] button.life-im-pc-btn-type-primary'
+      ]
+    : [
+        selector,
+        '.dzim-chat-input-send > button.send-button',
+        '.dzim-chat-input-send > button.dzim-button-primary',
+        '.dzim-chat-input-send button'
+      ].filter(Boolean);
   for (const item of preferred) {
     const button = queryOneDeep(targetDocument, item);
     if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true')
       return button;
   }
-  // 最后按可见文本兜底，但必须落在聊天输入发送区，避免点到右侧商品“发送”。
-  const scoped = queryAllDeep(targetDocument, '.dzim-chat-input-send button, .dzim-chat-input-send [role="button"]');
-  return scoped.find((button) => (button.textContent || '').trim() === '发送') || null;
+  const scoped = settings?.platform === 'douyin'
+    ? queryAllDeep(targetDocument, '[class*="inputWrapper-"] button, [class*="send-"] button')
+    : queryAllDeep(targetDocument, '.dzim-chat-input-send button, .dzim-chat-input-send [role="button"]');
+  return scoped.find((button) => button.tagName === 'BUTTON' && (button.textContent || '').trim() === '发送') || null;
 }
 
-function clickSendControl(targetDocument, selector) {
-  // 经营宝按钮可能绑定 pointer/mouse 事件链，不只是 click；按人工点击顺序派发更稳。
+function clickSendControl(targetDocument, selector, settings) {
   dismissSmartReplyOverlay(targetDocument);
-  const button = resolveSendButton(targetDocument, selector);
+  const button = resolveSendButton(targetDocument, selector, settings);
   if (!button)
     return false;
   if (button.disabled || button.getAttribute('aria-disabled') === 'true' || button.getAttribute('disabled') != null)
@@ -422,145 +743,618 @@ function trySubmitByEnter(input) {
   }
 }
 
-function scheduleUnreadConversation(settings) {
-  // 调度器严格串行：当前草稿尚未回填时不切换，防止多个客户共用一个输入框造成串话。
-  if (!settings.autoSwitchConversations || conversationTask)
-    return;
-  for (const targetDocument of getAccessibleDocuments()) {
-    const input = settings.replyInputSelector ? queryOneDeep(targetDocument, settings.replyInputSelector) : null;
-    if (input?.textContent?.trim() || input?.value?.trim())
+function clickConversationItem(item, settings) {
+  const target = clickableConversationTarget(item, settings);
+  const view = target.ownerDocument.defaultView;
+  target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  const rect = target.getBoundingClientRect();
+  const clientX = rect.left + Math.max(rect.width / 2, 1);
+  const clientY = rect.top + Math.max(rect.height / 2, 1);
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    const EventCtor = type.startsWith('pointer') && view?.PointerEvent ? view.PointerEvent : MouseEvent;
+    target.dispatchEvent(new EventCtor(type, {
+      bubbles: true,
+      cancelable: true,
+      view,
+      buttons: 1,
+      clientX,
+      clientY,
+      screenX: clientX,
+      screenY: clientY,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true
+    }));
+  }
+  if (typeof target.click === 'function')
+    target.click();
+}
+
+function findDouyinTabByLabel(targetDocument, label) {
+  return queryAllDeep(targetDocument, '[role="tab"], button, div, span, a')
+    .find((element) => element.textContent?.trim() === label
+      && element.getBoundingClientRect().width > 0
+      && element.getBoundingClientRect().height > 0);
+}
+
+function isDouyinTabSelected(element) {
+  let node = element;
+  for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+    if (node.getAttribute('aria-selected') === 'true')
+      return true;
+    const cls = String(node.className || '');
+    if (/(^|\s|-)(active|selected|current|checked)(-|\s|$)/i.test(cls))
+      return true;
+  }
+  return false;
+}
+
+function getDouyinListTabMode(targetDocument) {
+  const historyTab = findDouyinTabByLabel(targetDocument, '历史咨询');
+  const currentTab = findDouyinTabByLabel(targetDocument, '当前咨询');
+  if (historyTab && isDouyinTabSelected(historyTab))
+    return 'history';
+  if (currentTab && isDouyinTabSelected(currentTab))
+    return 'current';
+  // 无法明确判断时默认当前咨询，避免误把 RPA 整页暂停。
+  return 'current';
+}
+
+function isDouyinHistoryTabActive(targetDocument) {
+  return getDouyinListTabMode(targetDocument) === 'history';
+}
+
+function isDouyinRpaAllowed(targetDocument, settings) {
+  return settings?.platform !== 'douyin' || !isDouyinHistoryTabActive(targetDocument);
+}
+
+function isDouyinChatClosed(targetDocument) {
+  const bodyText = targetDocument.body?.innerText || '';
+  return /不可回复|会话已关闭|已关闭超过/i.test(bodyText)
+    || Boolean(queryOneDeep(targetDocument, '[class*="disabledTextarea-"], textarea[class*="disabled"]'));
+}
+
+function isDouyinChatLoading(targetDocument) {
+  // 只认聊天区内可见的 loading；侧栏隐藏节点会导致永远 chatReady=false。
+  const loaders = queryAllDeep(targetDocument, '.life-im-pc-loading, .life-im-pc-loading-block, [class*="loading-block"]');
+  const visibleLoader = loaders.find((node) => {
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0)
+      return false;
+    const style = getComputedStyle(node);
+    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0;
+  });
+  return Boolean(visibleLoader) && !queryDouyinReplyInput(targetDocument, { platform: 'douyin' });
+}
+
+function getDouyinDomCustomerName(targetDocument, settings) {
+  // 只读页面真实顶部/选中态，禁止用 conversationTask 猜测，否则会误判“已在目标会话”。
+  const selectors = [
+    '[class*="topbar-"] [class*="uname-"]',
+    '[class*="chatRoom-"] [class*="uname-"]',
+    settings?.customerNameSelector
+  ].filter(Boolean);
+  for (const selector of selectors) {
+    const name = queryOneDeep(targetDocument, selector)?.textContent?.trim();
+    if (name && !isDouyinPlaceholderName(name) && !isDouyinSystemSessionName(name))
+      return name;
+  }
+  const fromList = getDouyinSelectedListCustomerName(targetDocument);
+  if (fromList && !isDouyinPlaceholderName(fromList) && !isDouyinSystemSessionName(fromList))
+    return fromList;
+  return '';
+}
+
+function resolveDouyinCustomerName(targetDocument, settings) {
+  return getDouyinDomCustomerName(targetDocument, settings)
+    || (conversationTask?.expectedCustomerName && !isDouyinPlaceholderName(conversationTask.expectedCustomerName)
+      ? conversationTask.expectedCustomerName
+      : '');
+}
+
+function queryDouyinReplyInput(targetDocument, settings) {
+  const selectors = [
+    settings?.replyInputSelector,
+    '[class*="inputWrapper-"] textarea:not([class*="disabledTextarea"]):not([disabled])',
+    '[class*="inputWrapper-"] textarea',
+    'textarea[class*="textarea-"]'
+  ].filter(Boolean);
+  for (const selector of selectors) {
+    const input = queryOneDeep(targetDocument, selector);
+    if (!input || input.disabled)
       continue;
-    const unreadItem = conversationItemsOf(targetDocument, settings)
-      .find((item) => unreadCountOf(item, settings) > 0 && isAllowedConversation(settings, null, item));
+    if (String(input.className || '').includes('disabledTextarea'))
+      continue;
+    return input;
+  }
+  return null;
+}
+
+function queryDouyinMessageItems(targetDocument, settings) {
+  const selectors = [
+    settings?.messageItemSelector,
+    '.chatd-message--left .chatd-bubble--other',
+    '.chatd-message.chatd-message--left',
+    '.chatd-bubble--other'
+  ].filter(Boolean);
+  for (const selector of selectors) {
+    const items = queryAllDeep(targetDocument, selector)
+      .filter((item) => !item.closest('.chatd-systemMessage') && !item.closest('.dynamic-card-'));
+    if (items.length)
+      return items;
+  }
+  return [];
+}
+
+function isDouyinChatReady(targetDocument, settings) {
+  if (isDouyinChatClosed(targetDocument))
+    return false;
+  if (isDouyinChatLoading(targetDocument))
+    return false;
+  const emptyPlaceholder = queryOneDeep(targetDocument, '[class*="chatRoom-"][role="button"]');
+  const hasInput = Boolean(queryDouyinReplyInput(targetDocument, settings));
+  const hasMessages = queryDouyinMessageItems(targetDocument, settings).length > 0;
+  if (emptyPlaceholder && !hasInput && !hasMessages)
+    return false;
+  return hasInput || hasMessages;
+}
+
+function isReplyReady(targetDocument, settings) {
+  if (settings?.platform === 'douyin') {
+    if (isDouyinChatClosed(targetDocument))
+      return false;
+    return Boolean(queryDouyinReplyInput(targetDocument, settings));
+  }
+  const input = settings.replyInputSelector ? queryOneDeep(targetDocument, settings.replyInputSelector) : null;
+  if (!input)
+    return false;
+  if (input.disabled || input.getAttribute('aria-disabled') === 'true')
+    return false;
+  return true;
+}
+
+function shouldDeferSwitch(targetDocument, settings) {
+  if (!isReplyReady(targetDocument, settings))
+    return false;
+  const input = queryOneDeep(targetDocument, settings.replyInputSelector);
+  return Boolean(input?.textContent?.trim() || input?.value?.trim());
+}
+
+function findConversationItemByHint(targetDocument, settings, hint) {
+  if (!hint)
+    return null;
+  const normalizedHint = normalizeConversationKey(hint);
+  return conversationItemsOf(targetDocument, settings).find((item) => {
+    const name = normalizeConversationKey(conversationIdOf(item, settings));
+    return Boolean(name) && (name.includes(normalizedHint) || normalizedHint.includes(name));
+  }) || null;
+}
+
+function shouldSwitchToUnread(targetDocument, settings) {
+  const unreadItem = findUnreadConversationItem(targetDocument, settings);
+  const targetUrl = targetDocument.location?.href || location.href;
+  if (settings.platform === 'douyin') {
+    const centerName = getDouyinDomCustomerName(targetDocument, settings);
+    // 聊天区假切换/loading：即使顶部暂时无昵称，也要重新点左侧客户卡片。
+    if (!isDouyinChatReady(targetDocument, settings)) {
+      if (unreadItem)
+        return unreadItem;
+      const selected = getDouyinSelectedListCustomerName(targetDocument);
+      if (selected && !isDouyinSystemSessionName(selected))
+        return findConversationItemByHint(targetDocument, settings, selected);
+      if (conversationTask?.expectedCustomerName)
+        return findConversationItemByHint(targetDocument, settings, conversationTask.expectedCustomerName);
+    }
     if (!unreadItem)
-      continue;
-    const expectedConversationId = conversationIdOf(unreadItem);
-    conversationTask = {
-      expectedConversationId,
-      unreadCount: unreadCountOf(unreadItem, settings),
-      phase: 'switching',
-      startedAt: Date.now()
-    };
-    setProcessingStatus('正在切换未读会话');
-    // 使用页面真实点击事件切换客户，保持与真实商家后台行为一致。
-    clickableConversationTarget(unreadItem).click();
-    schedulerTimer = setTimeout(() => {
-      // 页面结构变化或网络卡顿时释放任务，后续扫描可重新发现仍未处理的红点。
-      // OpenClaw + Embedding 在本机可能超过 30 秒，过早切换会让返回草稿失去原会话投递目标。
-      if (conversationTask?.startedAt && Date.now() - conversationTask.startedAt >= 120000)
-        conversationTask = null;
-    }, 121000);
+      return null;
+    if (isDouyinChatClosed(targetDocument))
+      return unreadItem;
+    if (isDouyinSystemSessionName(centerName))
+      return unreadItem;
+    const unreadName = conversationIdOf(unreadItem, settings);
+    if (!centerName)
+      return unreadItem;
+    if (!conversationIdsMatch(unreadName, centerName, settings, { customerName: centerName }))
+      return unreadItem;
+    return null;
+  }
+  if (!unreadItem)
+    return null;
+  const session = readSession(targetDocument, settings, targetUrl);
+  if (!hasRealConversation(session))
+    return unreadItem;
+  const unreadId = conversationIdOf(unreadItem, settings);
+  const currentId = session.conversationId || session.customerId;
+  if (unreadId && currentId && unreadId !== currentId)
+    return unreadItem;
+  return null;
+}
+
+async function clickDouyinConversationItem(item, nameHint) {
+  const card = item.closest('[class*="contactCard-"]') || item;
+  const hint = nameHint || conversationIdOf(card, { platform: 'douyin' });
+  clickConversationItem(card, { platform: 'douyin' });
+  await safeRuntimeMessage({ type: 'douyinMainClick', nameHint: hint });
+}
+
+function beginConversationSwitch(settings, item, hint, options = {}) {
+  const expectedConversationId = settings.platform === 'meituan'
+    ? (conversationIdOf(item, settings) || hint || '')
+    : (conversationIdOf(item, settings) || hint || '');
+  conversationTask = {
+    expectedConversationId,
+    expectedCustomerName: settings.platform === 'douyin' ? (conversationIdOf(item, settings) || hint || '') : undefined,
+    unreadCount: unreadCountOf(item, settings) || 1,
+    phase: options.waitDraft ? 'waiting-draft' : 'switching',
+    startedAt: Date.now()
+  };
+  clearTimeout(schedulerTimer);
+  schedulerTimer = setTimeout(() => {
+    if (conversationTask?.startedAt && Date.now() - conversationTask.startedAt >= 120000)
+      conversationTask = null;
+  }, 121000);
+}
+
+function scheduleMeituanUnreadConversation(settings, targetDocument) {
+  const input = settings.replyInputSelector ? queryOneDeep(targetDocument, settings.replyInputSelector) : null;
+  if (input?.textContent?.trim() || input?.value?.trim())
+    return false;
+  const unreadItem = findUnreadConversationItem(targetDocument, settings);
+  if (!unreadItem)
+    return false;
+  switchToConversation(settings, targetDocument, conversationIdOf(unreadItem, settings));
+  return true;
+}
+
+function scheduleDouyinUnreadConversation(settings, targetDocument) {
+  if (isDouyinHistoryTabActive(targetDocument))
+    return false;
+  const switchItem = shouldSwitchToUnread(targetDocument, settings);
+  if (!switchItem)
+    return false;
+  if (shouldDeferSwitch(targetDocument, settings))
+    return false;
+  switchToConversation(settings, targetDocument, conversationIdOf(switchItem, settings));
+  return true;
+}
+
+function switchToConversation(settings, targetDocument, hint, options = {}) {
+  const item = findConversationItemByHint(targetDocument, settings, hint)
+    || findUnreadConversationItem(targetDocument, settings);
+  if (!item)
+    return false;
+  setProcessingStatus(`正在切换会话：${conversationIdOf(item, settings) || hint || ''}`);
+  beginConversationSwitch(settings, item, hint, options);
+  if (settings.platform === 'douyin')
+    void clickDouyinConversationItem(item, hint || conversationIdOf(item, settings));
+  else
+    clickConversationItem(item, settings);
+  return true;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function findSessionDocument(settings, expectedSession) {
+  return getAccessibleDocuments().find((candidate) => {
+    const current = readSession(candidate, settings, candidate.location?.href || location.href);
+    return sessionsMatch(expectedSession, current, settings);
+  }) || null;
+}
+
+function findUnreadConversationItem(targetDocument, settings) {
+  const unreadItems = conversationItemsOf(targetDocument, settings)
+    .filter((item) => unreadCountOf(item, settings) > 0 && isAllowedConversation(settings, null, item));
+  if (!unreadItems.length)
+    return null;
+  if (settings.platform === 'douyin') {
+    // 客户未读优先于「预警通知」等系统会话，避免停在系统页不切换。
+    return unreadItems.find((item) => !isDouyinSystemSessionName(conversationIdOf(item, settings))) || null;
+  }
+  return unreadItems[0];
+}
+
+function scheduleUnreadConversation(settings, targetDocument = document) {
+  // 调度器严格串行：当前草稿尚未回填时不切换，防止多个客户共用一个输入框造成串话。
+  if (!settings?.autoSwitchConversations)
     return;
+  if (settings.platform === 'douyin') {
+    const targetUrl = targetDocument.location?.href || location.href;
+    const centerName = getDouyinDomCustomerName(targetDocument, settings);
+    const chatReady = isDouyinChatReady(targetDocument, settings);
+    if (conversationTask?.phase === 'waiting-draft') {
+      if (!chatReady || isDouyinSystemSessionName(centerName) || shouldSwitchToUnread(targetDocument, settings))
+        clearConversationTask(!chatReady ? '聊天区未就绪，重新打开会话' : '目标会话仍未打开，重新切换');
+    }
+    // switching 卡住超过 4 秒且聊天区仍未就绪，强制释放后重点。
+    if (conversationTask?.phase === 'switching' && Date.now() - conversationTask.startedAt > 4000 && !chatReady)
+      clearConversationTask('切换超时，重新点击会话');
+  }
+  if (conversationTask?.phase === 'waiting-draft') {
+    // 美团等待草稿过久时释放锁，避免整页永久不切换。
+    if (settings.platform === 'meituan' && Date.now() - conversationTask.startedAt > 45000)
+      clearConversationTask('等待草稿超时，继续处理未读');
+    else
+      return;
+  }
+  if (conversationTask?.phase === 'switching' && Date.now() - conversationTask.startedAt > 5000) {
+    const targetUrl = targetDocument.location?.href || location.href;
+    const session = readSession(targetDocument, settings, targetUrl);
+    if (!conversationMatchesTask(session, conversationTask, settings))
+      clearConversationTask('切换未完成，重新尝试');
+  }
+  if (conversationTask)
+    return;
+  for (const doc of targetDocument ? [targetDocument] : getAccessibleDocuments()) {
+    const switched = settings.platform === 'douyin'
+      ? scheduleDouyinUnreadConversation(settings, doc)
+      : scheduleMeituanUnreadConversation(settings, doc);
+    if (switched)
+      return;
   }
 }
 
 async function scanMessages() {
-  // 首次进入客户会话只建立历史基线，之后新增的左右消息才分别进入 inbound/outbound。
   if (!isExtensionContextAlive()) {
     stopInvalidExtensionContext();
     return;
   }
-  let settings;
-  try {
-    settings = await chrome.storage.local.get();
-  } catch {
-    stopInvalidExtensionContext();
-    return;
-  }
-  if (!settings.enabled || !settings.messageItemSelector)
-    return;
   for (const targetDocument of getAccessibleDocuments()) {
     const targetUrl = targetDocument.location?.href || location.href;
-    const session = readMeituanSession(targetDocument, settings, targetUrl);
+    if (!globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(targetUrl))
+      continue;
+    let settings;
+    try {
+      settings = await resolveSettings(targetUrl);
+    } catch {
+      stopInvalidExtensionContext();
+      return;
+    }
+    void safeRuntimeMessage({
+      type: 'diagnostics',
+      payload: {
+        ...collectDiagnostics(settings, targetDocument),
+        bootstrap: false,
+        frameHref: targetUrl,
+        contentScriptAlive: true
+      }
+    });
+    if (settings?.enabled === false)
+      continue;
+    if (!isDouyinRpaAllowed(targetDocument, settings)) {
+      clearConversationTask('历史咨询页不自动处理');
+      void safeRuntimeMessage({ type: 'clearFrameSession' });
+      setProcessingStatus('历史咨询页不自动处理，请切回当前咨询');
+      continue;
+    }
+    scheduleUnreadConversation(settings, targetDocument);
+    if (!settings.messageItemSelector)
+      continue;
+    const session = readSession(targetDocument, settings, targetUrl);
     const conversationId = session.conversationId;
     const customerId = session.customerId;
-    void safeRuntimeMessage({ type: 'diagnostics', payload: collectDiagnostics(settings, targetDocument) });
-    if (conversationTask?.expectedConversationId && conversationTask.expectedConversationId !== conversationId && Date.now() - conversationTask.startedAt > 5000)
+    if (conversationTask && !conversationMatchesTask(session, conversationTask, settings) && Date.now() - conversationTask.startedAt > 5000)
       clearConversationTask('已释放过期会话切换任务');
-    const messageItems = queryAllDeep(targetDocument, settings.messageItemSelector);
+    const messageItems = settings.platform === 'douyin'
+      ? queryDouyinMessageItems(targetDocument, settings)
+      : queryAllDeep(targetDocument, settings.messageItemSelector);
     const outboundItems = queryAllDeep(targetDocument, settings.outboundMessageItemSelector || '.message-cell-container:has(.message-wrapper.right-message .text-message.shop-text)');
-    const hasRealConversation = session.shopId !== 'default-shop'
-      && !['经营宝聊天页', '/dzim-workbench-pc/index.html'].includes(session.conversationId);
-    // 外层壳页面没有真实 userId，不能注册为会话，否则旧草稿可能被错误回填到当前客户输入框。
-    if (!hasRealConversation)
+    const hasRealConversationFlag = hasRealConversation(session);
+    if (!hasRealConversationFlag) {
+      scheduleUnreadConversation(settings, targetDocument);
       continue;
+    }
     if (!isAllowedConversation(settings, session, null)) {
       clearConversationTask(`已忽略非测试客户：${session.customerName || session.conversationId}`);
       void safeRuntimeMessage({ type: 'clearFrameSession' });
       setProcessingStatus(`已忽略非测试客户：${session.customerName || session.conversationId}`);
       continue;
     }
+    // 预警通知等系统会话不参与 AI 回复，只负责触发切换到客户未读。
+    if (settings.platform === 'douyin' && isDouyinSystemSessionName(session.customerName || session.conversationId)) {
+      scheduleUnreadConversation(settings, targetDocument);
+      continue;
+    }
+    // 抖音 URL/顶部昵称已切换但中间聊天区仍在 loading 或占位时，不读消息，避免串会话。
+    if (settings.platform === 'douyin' && !isDouyinChatReady(targetDocument, settings)) {
+      scheduleUnreadConversation(settings, targetDocument);
+      continue;
+    }
+    if (settings.platform === 'douyin' && isDouyinPlaceholderName(session.conversationId) && !session.customerName) {
+      scheduleUnreadConversation(settings, targetDocument);
+      continue;
+    }
     void safeRuntimeMessage({ type: 'session', payload: session });
     const isInitialConversationScan = !initializedConversations.has(`${session.shopId}:${conversationId}`);
-    const scheduledUnreadCount = conversationTask
-      && (!conversationTask.expectedConversationId || conversationTask.expectedConversationId === conversationId)
+    let scheduledUnreadCount = conversationTask && conversationMatchesTask(session, conversationTask, settings)
       ? conversationTask.unreadCount : 0;
+    const cardUnreadCount = settings.platform === 'douyin'
+      ? getDouyinCardUnreadCountForSession(targetDocument, settings, session)
+      : 0;
+    if (settings.platform === 'douyin' && cardUnreadCount > scheduledUnreadCount)
+      scheduledUnreadCount = cardUnreadCount;
+    scheduledUnreadCount = Math.min(Math.max(0, scheduledUnreadCount), 9);
     let inboundSent = 0;
-    const processItems = (items, direction, textSelector) => items.forEach((item, index) => {
-      const content = textOf(item, textSelector);
-      const id = item.getAttribute('data-messageid') || item.getAttribute('data-message-id') || createStableId(conversationId, direction, content, index);
-      if (!content || seenMessages.has(id))
-        return;
-      seenMessages.add(id);
-      // 第一次进入某个客户会话时只建立历史基线；后续新出现的 messageId 才进入 AI 回复链路。
-      // 自动切入一个从未打开过的客户时，只提交角标对应的最后 N 条未读，不能把全部历史记录送给 AI。
-      // 连续未读通常是客户拆成多句发送；只用最新一条触发回复，避免同一客户瞬间收到多份 AI 回答。
-      const isScheduledUnread = direction === 'inbound' && scheduledUnreadCount > 0 && index === items.length - 1;
-      if (isInitialConversationScan && !isScheduledUnread)
-        return;
-      if (direction === 'inbound') {
-        inboundSent += 1;
-        conversationTask = conversationTask || {
-          expectedConversationId: conversationId,
-          unreadCount: 1,
-          phase: 'waiting-draft',
-          startedAt: Date.now()
-        };
-        setProcessingStatus(`AI 正在处理：${session.customerName || conversationId}`);
-      }
-      void safeRuntimeMessage({
-        type: direction,
-        requestId: crypto.randomUUID(),
-        payload: {
-          platform: session.platform,
-          id,
-          shopId: session.shopId,
-          conversationId,
-          customerId,
-          customerName: session.customerName || item.getAttribute('data-customer-name') || undefined,
-          content,
-          aiGenerated: direction === 'outbound' && item.getAttribute('data-ai-generated') === 'true',
-          createdAt: item.getAttribute('data-created-at') || new Date().toISOString()
+    const processItems = (items, direction, textSelector) => {
+      const contentOccurrence = new Map();
+      items.forEach((item, index) => {
+        const content = textOf(item, textSelector);
+        if (!content)
+          return;
+        const occurrence = (contentOccurrence.get(content) || 0) + 1;
+        contentOccurrence.set(content, occurrence);
+        const id = createStableId(conversationId, direction, content, index, settings.platform, item, occurrence);
+        const contentKey = `${conversationId}:${direction}:${content}`;
+        const isTriggerUnread = direction === 'inbound' && scheduledUnreadCount > 0 && index === items.length - 1;
+        // 未读角标常在回复后残留；只有「同正文从未提交过」才允许强制重提，避免旧消息换 ID 后二次回复。
+        const forceUnreadResubmit = isTriggerUnread
+          && cardUnreadCount > 0
+          && !submittedInboundIds.has(id)
+          && !submittedInboundContents.has(contentKey);
+        if (seenMessages.has(id) && !forceUnreadResubmit)
+          return;
+        if (isInitialConversationScan && !isTriggerUnread) {
+          seenMessages.add(id);
+          return;
         }
+        seenMessages.add(id);
+        if (direction === 'inbound') {
+          inboundSent += 1;
+          submittedInboundIds.add(id);
+          submittedInboundContents.add(contentKey);
+          conversationTask = conversationTask || {
+            expectedConversationId: conversationId,
+            expectedCustomerName: session.customerName || conversationId,
+            unreadCount: scheduledUnreadCount || 1,
+            phase: 'waiting-draft',
+            startedAt: Date.now()
+          };
+          setProcessingStatus(`AI 正在处理：${session.customerName || conversationId}`);
+        }
+        void safeRuntimeMessage({
+          type: direction,
+          requestId: crypto.randomUUID(),
+          payload: {
+            platform: session.platform,
+            id,
+            shopId: session.shopId,
+            conversationId,
+            customerId,
+            customerName: session.customerName || item.getAttribute('data-customer-name') || undefined,
+            content,
+            aiGenerated: direction === 'outbound' && item.getAttribute('data-ai-generated') === 'true',
+            createdAt: item.getAttribute('data-created-at') || new Date().toISOString()
+          }
+        });
       });
-    });
+    };
     processItems(messageItems, 'inbound', settings.messageTextSelector);
     processItems(outboundItems, 'outbound', settings.outboundMessageTextSelector || '.text-message.shop-text');
     initializedConversations.add(`${session.shopId}:${conversationId}`);
-    if (conversationTask && (!conversationTask.expectedConversationId || conversationTask.expectedConversationId === conversationId) && inboundSent > 0)
+    if (conversationTask && conversationMatchesTask(session, conversationTask, settings) && inboundSent > 0)
       conversationTask.phase = 'waiting-draft';
+    scheduleUnreadConversation(settings, targetDocument);
   }
-  scheduleUnreadConversation(settings);
 }
 
 async function applyDraft(draft, expectedSession) {
-  // 回填前重新读取当前 shopId/userId；标签页相同但客户不同也必须拒绝，防止串话。
-  const settings = await chrome.storage.local.get();
-  if (!settings.replyInputSelector)
+  const settings = expectedSession?.platform
+    ? await resolveSettings(expectedSession.pageUrl || location.href)
+    : await resolveSettings(location.href);
+  if (!settings?.replyInputSelector)
     return;
-  const targetDocument = getAccessibleDocuments().find((candidate) => {
-    const current = readMeituanSession(candidate, settings, candidate.location?.href || location.href);
-    return current.shopId === expectedSession?.shopId && current.conversationId === expectedSession?.conversationId;
-  });
-  if (!targetDocument)
+  if (settings.platform === 'douyin') {
+    const hostDocument = getAccessibleDocuments().find((doc) => {
+      const url = doc.location?.href || location.href;
+      return globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(url);
+    }) || document;
+    if (isDouyinHistoryTabActive(hostDocument)) {
+      setProcessingStatus('历史咨询页不自动回复，请切回当前咨询');
+      void safeRuntimeMessage({
+        type: 'draft_send_result',
+        payload: {
+          platform: expectedSession?.platform,
+          customerName: expectedSession?.customerName,
+          conversationId: expectedSession?.conversationId,
+          draftId: draft.id,
+          riskLevel: draft.riskLevel,
+          allowAutoSend: false,
+          denyReason: 'history_tab',
+          clicked: false,
+          filledOnly: true,
+          method: 'history-tab-blocked',
+          content: draft.content
+        }
+      });
+      return;
+    }
+  }
+  let targetDocument = findSessionDocument(settings, expectedSession);
+  if ((!targetDocument || !isDouyinChatReady(targetDocument, settings)) && settings.platform === 'douyin') {
+    for (const candidate of getAccessibleDocuments()) {
+      const targetUrl = candidate.location?.href || location.href;
+      if (!globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(targetUrl))
+        continue;
+      if (switchToConversation(settings, candidate, expectedSession?.customerName || expectedSession?.conversationId, { waitDraft: true }))
+        break;
+    }
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await sleep(600);
+      targetDocument = findSessionDocument(settings, expectedSession);
+      if (targetDocument && isDouyinChatReady(targetDocument, settings))
+        break;
+    }
+  }
+  if (!targetDocument && settings.platform === 'meituan') {
+    for (const candidate of getAccessibleDocuments()) {
+      const targetUrl = candidate.location?.href || location.href;
+      if (!globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(targetUrl))
+        continue;
+      if (switchToConversation(settings, candidate, expectedSession?.conversationId || expectedSession?.customerId, { waitDraft: true }))
+        break;
+    }
+    await sleep(700);
+    targetDocument = findSessionDocument(settings, expectedSession);
+  }
+  if (!targetDocument) {
+    setProcessingStatus(`切换失败，未找到目标会话：${expectedSession?.customerName || expectedSession?.conversationId || ''}`);
+    void safeRuntimeMessage({
+      type: 'draft_send_result',
+      payload: {
+        platform: expectedSession?.platform,
+        customerName: expectedSession?.customerName,
+        conversationId: expectedSession?.conversationId,
+        draftId: draft.id,
+        riskLevel: draft.riskLevel,
+        allowAutoSend: false,
+        denyReason: 'switch_failed',
+        clicked: false,
+        filledOnly: true,
+        method: 'switch-failed',
+        content: draft.content
+      }
+    });
+    clearConversationTask('草稿投递前未能切换到目标会话');
+    setTimeout(scanMessages, 500);
     return;
-  const input = queryOneDeep(targetDocument, settings.replyInputSelector);
-  if (!input)
+  }
+  let input = settings.platform === 'douyin'
+    ? queryDouyinReplyInput(targetDocument, settings)
+    : queryOneDeep(targetDocument, settings.replyInputSelector);
+  if (!input && settings.platform === 'douyin') {
+    switchToConversation(settings, targetDocument, expectedSession?.customerName || expectedSession?.conversationId, { waitDraft: true });
+    for (let attempt = 0; attempt < 8 && !input; attempt += 1) {
+      await sleep(600);
+      input = queryDouyinReplyInput(targetDocument, settings);
+    }
+  }
+  if (!input) {
+    setProcessingStatus('聊天区未就绪：未找到输入框');
+    void safeRuntimeMessage({
+      type: 'draft_send_result',
+      payload: {
+        platform: expectedSession?.platform,
+        customerName: expectedSession?.customerName,
+        conversationId: expectedSession?.conversationId,
+        draftId: draft.id,
+        riskLevel: draft.riskLevel,
+        allowAutoSend: false,
+        denyReason: 'chat_not_ready',
+        clicked: false,
+        filledOnly: true,
+        method: 'chat-not-ready',
+        content: draft.content
+      }
+    });
+    clearConversationTask('聊天区未加载完成');
+    setTimeout(scanMessages, 500);
     return;
+  }
   const canAutoSend = settings.autoSend && draft.allowAutoSend && draft.riskLevel === 'low' && settings.sendButtonSelector;
   if (settings.autoSwitchConversations && settings.autoSend && draft.riskLevel !== 'low') {
     // 全自动队列只跳过中高风险草稿；低风险草稿即使未通过发送冷却，也要先回填给客服确认。
-    if (conversationTask && conversationTask.expectedConversationId === expectedSession?.conversationId) {
+    if (conversationTask && conversationMatchesTask(expectedSession, conversationTask, settings)) {
       clearTimeout(schedulerTimer);
       conversationTask = null;
       setProcessingStatus('已转人工，继续等待新消息');
@@ -569,45 +1363,33 @@ async function applyDraft(draft, expectedSession) {
     return;
   }
   dispatchEditableInput(input, draft.content);
+  if (settings.platform === 'douyin')
+    await waitForDouyinSendReady(targetDocument, settings, input, 3500);
   // 自动发送必须同时满足扩展开关和服务端安全环境变量；默认永远只回填供人工确认。
   if (canAutoSend) {
-    setTimeout(() => {
-      dismissSmartReplyOverlay(input.ownerDocument);
-      let clicked = clickSendControl(input.ownerDocument, settings.sendButtonSelector);
-      let method = clicked ? 'send-button' : '';
-      if (!clicked) {
-        trySubmitByEnter(input);
-        clicked = clickSendControl(input.ownerDocument, settings.sendButtonSelector);
-        method = clicked ? 'enter+send-button' : 'enter-only';
+    await sleep(400);
+    const { clicked, method } = await attemptAutoSend(input, targetDocument, settings);
+    setProcessingStatus(clicked
+      ? `已自动回复：${expectedSession?.customerName || expectedSession?.conversationId || ''}`
+      : `已回填但发送失败：${settings.sendButtonSelector}`);
+    void safeRuntimeMessage({
+      type: 'draft_send_result',
+      payload: {
+        platform: expectedSession?.platform,
+        shopId: expectedSession?.shopId,
+        conversationId: expectedSession?.conversationId,
+        customerId: expectedSession?.customerId,
+        customerName: expectedSession?.customerName,
+        draftId: draft.id,
+        riskLevel: draft.riskLevel,
+        allowAutoSend: true,
+        clicked,
+        filledOnly: !clicked,
+        method,
+        content: draft.content
       }
-      // 经营宝有时要等内部状态刷新后才真正启用发送，再补一次延迟点击。
-      if (clicked) {
-        setTimeout(() => {
-          dismissSmartReplyOverlay(input.ownerDocument);
-          clickSendControl(input.ownerDocument, settings.sendButtonSelector);
-        }, 500);
-      }
-      setProcessingStatus(clicked
-        ? `已自动回复：${expectedSession?.customerName || expectedSession?.conversationId || ''}`
-        : `已回填但发送失败：${settings.sendButtonSelector}`);
-      void safeRuntimeMessage({
-        type: 'draft_send_result',
-        payload: {
-          platform: expectedSession?.platform,
-          shopId: expectedSession?.shopId,
-          conversationId: expectedSession?.conversationId,
-          customerId: expectedSession?.customerId,
-          customerName: expectedSession?.customerName,
-          draftId: draft.id,
-          riskLevel: draft.riskLevel,
-          allowAutoSend: true,
-          clicked,
-          filledOnly: !clicked,
-          method: method || (clicked ? 'send-button' : 'none'),
-          content: draft.content
-        }
-      });
-    }, 400);
+    });
+    releaseConversationTaskAfterDraft(expectedSession, settings, clicked ? 1500 : 600);
   } else {
     // 低风险但暂未满足自动点击条件时，保留在输入框，便于现场人工确认和排查发送冷却/服务端开关。
     const skipReason = !settings.autoSend
@@ -638,12 +1420,7 @@ async function applyDraft(draft, expectedSession) {
         content: draft.content
       }
     });
-  }
-  // 当前客户已经拿到草稿后才释放串行锁；下一轮扫描才允许切换到另一个未读客户。
-  if (conversationTask && conversationTask.expectedConversationId === expectedSession?.conversationId) {
-    clearTimeout(schedulerTimer);
-    conversationTask = null;
-    setTimeout(scanMessages, 500);
+    releaseConversationTaskAfterDraft(expectedSession, settings, 600);
   }
 }
 
@@ -674,4 +1451,30 @@ observer.observe(document.documentElement, { childList: true, subtree: true });
 // 平台可能在父文档不变的情况下更新 iframe 内部 DOM，定时扫描用于覆盖这种变化。
 scanInterval = setInterval(scanMessages, 1500);
 void scanMessages();
+void (async function bootstrapDiagnostics() {
+  const platform = globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(location.href);
+  if (!platform)
+    return;
+  const settings = await resolveSettings(location.href).catch(() => null);
+  void safeRuntimeMessage({
+    type: 'diagnostics',
+    payload: {
+      pageUrl: location.href,
+      frameTitle: document.title,
+      platform,
+      bootstrap: true,
+      contentScriptAlive: true,
+      settingsState: {
+        enabled: settings?.enabled !== false,
+        autoSwitchConversations: settings?.autoSwitchConversations === true,
+        autoSend: settings?.autoSend === true
+      },
+      conversationCounts: {
+        items: settings ? conversationItemsOf(document, settings).length : 0,
+        unread: settings ? conversationItemsOf(document, settings).filter((item) => unreadCountOf(item, settings) > 0).length : 0,
+        bootstrap: true
+      }
+    }
+  });
+})();
 }

@@ -1,3 +1,9 @@
+/**
+ * @file services/rag-service/src/rag/tests/rag-service.test.ts
+ * @module GBrain 与 Hybrid RAG
+ * @description 8 个 Hybrid RAG 核心回归测试用例。
+ * @see 联动关注：规则变化时需更新预期断言。
+ */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifyIntent, detectIntentCategories } from '../intent-classifier.js';

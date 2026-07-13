@@ -54,6 +54,65 @@ function Start-AppProcess([string]$Name, [string]$Entry, [string]$WorkingDirecto
   [IO.File]::WriteAllText($pidFile, [string]$process.Id, $utf8NoBom)
 }
 
+function Test-ContainerRunning([string]$Name) {
+  $state = & docker inspect -f '{{.State.Running}}' $Name 2>$null
+  return $state -eq 'true'
+}
+
+function Ensure-DockerServices {
+  $postgresUp = Test-ContainerRunning 'customer-ai-postgres'
+  $redisUp = Test-ContainerRunning 'customer-ai-redis'
+  if ($postgresUp -and $redisUp) {
+    Write-Host 'Docker: reusing existing customer-ai-postgres and customer-ai-redis.' -ForegroundColor DarkGray
+    return
+  }
+  Push-Location $Root
+  try { docker compose up -d } finally { Pop-Location }
+  if (-not (Test-ContainerRunning 'customer-ai-postgres') -or -not (Test-ContainerRunning 'customer-ai-redis')) {
+    throw 'Docker services failed to start. Check Docker Desktop.'
+  }
+}
+
+function Test-PortListening([int]$Port) {
+  $portMatches = netstat -ano | Select-String -Pattern "127\.0\.0\.1:$Port\s+.*LISTENING"
+  return [bool]$portMatches
+}
+
+function Ensure-OpenClawGateway {
+  $portableTokenFile = Join-Path $Root 'openclaw\data\.openclaw\gateway-token.txt'
+  $gatewayAlreadyRunning = Wait-Http 'http://127.0.0.1:18789/' 2
+  if ($gatewayAlreadyRunning) {
+    if (Test-Path -LiteralPath $portableTokenFile) {
+      Write-Host 'OpenClaw: reusing portable gateway already running.' -ForegroundColor DarkGray
+      return
+    }
+    # Reuse dev OpenClaw when pnpm dev already started the gateway on this machine.
+    $devOpenClawRoots = @(
+      (Join-Path $Root '..\OpenClaw-USB-Portable'),
+      'F:\OpenClaw-USB-Portable'
+    )
+    foreach ($devRoot in $devOpenClawRoots) {
+      $devToken = Join-Path $devRoot 'data\.openclaw\gateway-token.txt'
+      if (-not (Test-Path -LiteralPath $devToken)) { continue }
+      Ensure-Dir @((Split-Path -Parent $portableTokenFile))
+      Copy-Item -LiteralPath $devToken -Destination $portableTokenFile -Force
+      Write-Host "OpenClaw: reusing existing gateway on 18789 (token from $devRoot)." -ForegroundColor DarkGray
+      return
+    }
+    throw 'Port 18789 is used by another OpenClaw instance. Stop the dev OpenClaw before starting this package.'
+  }
+  Start-Process -FilePath 'powershell' -ArgumentList @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    ('"' + (Join-Path $Root 'openclaw\Start-OpenClaw.ps1') + '"'), '-NoBrowser'
+  ) -WorkingDirectory (Join-Path $Root 'openclaw') -WindowStyle Hidden | Out-Null
+}
+
+function Ensure-PortAvailable([int]$Port, [string]$Hint) {
+  if (Test-PortListening $Port) {
+    throw "Port $Port is already in use. $Hint"
+  }
+}
+
 Ensure-Dir @($PidDir, $LogDir, (Join-Path $Root 'data\sessions'))
 if (-not (Test-Path -LiteralPath $NodeExe)) { throw 'Portable Node is missing. Rebuild the delivery package.' }
 
@@ -68,34 +127,23 @@ if (-not (Test-DockerReady)) {
 }
 if (-not (Test-DockerReady)) { throw 'Docker Desktop is not ready. Install and start Docker Desktop.' }
 
-Push-Location $Root
-try { docker compose up -d } finally { Pop-Location }
+Ensure-DockerServices
 
-$portableTokenFile = Join-Path $Root 'openclaw\data\.openclaw\gateway-token.txt'
-$gatewayAlreadyRunning = Wait-Http 'http://127.0.0.1:18789/' 2
-if ($gatewayAlreadyRunning -and -not (Test-Path -LiteralPath $portableTokenFile)) {
-  throw 'Port 18789 is used by another OpenClaw instance. Stop it before starting this package.'
-}
-if (-not $gatewayAlreadyRunning) {
-  Start-Process -FilePath 'powershell' -ArgumentList @(
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-    ('"' + (Join-Path $Root 'openclaw\Start-OpenClaw.ps1') + '"'), '-NoBrowser'
-  ) -WorkingDirectory (Join-Path $Root 'openclaw') -WindowStyle Hidden | Out-Null
-}
+Ensure-OpenClawGateway
 if (-not (Wait-Http 'http://127.0.0.1:18789/' 90)) { throw 'OpenClaw failed to start. Check openclaw\data\logs.' }
-Start-Process 'http://127.0.0.1:18788/' | Out-Null
+
+Ensure-PortAvailable 8787 'Stop the dev RAG service (pnpm dev) before starting the portable package.'
+Ensure-PortAvailable 3001 'Stop the dev API service (pnpm dev) before starting the portable package.'
 
 Start-AppProcess 'rag-service' (Join-Path $Root 'app\rag-service\dist\main.js') (Join-Path $Root 'app\rag-service')
 if (-not (Wait-Http 'http://127.0.0.1:8787/health' 60)) { throw 'RAG service failed to start. Check data\logs.' }
-# 便携包默认走 Chrome 扩展 + 本地 WebSocket。这样客服使用自己的真实 Chrome 登录态，
-# 不需要 Playwright 重新登录，也能避开平台对自动化浏览器的风控。
+# Extension mode: real Chrome login + local WebSocket, no Playwright relogin.
 $env:RPA_MOCK_MODE = 'extension'
 Start-AppProcess 'api' (Join-Path $Root 'app\backend\dist\main.js') (Join-Path $Root 'app\backend')
 if (-not (Wait-Http 'http://127.0.0.1:3001/health' 60)) { throw 'API service failed to start. Check data\logs.' }
 
-Start-Process 'http://127.0.0.1:8787/kb-admin' | Out-Null
-Start-Process 'http://127.0.0.1:3001/rpa/extension/status' | Out-Null
-Start-Process (Join-Path $Root 'docs\project-flow.html') | Out-Null
+Start-Process 'http://127.0.0.1:3001/guide' | Out-Null
+Write-Host 'Guide:          http://127.0.0.1:3001/guide' -ForegroundColor Green
 Write-Host 'Customer AI workspace is running.' -ForegroundColor Green
 Write-Host 'Knowledge Base: http://127.0.0.1:8787/kb-admin'
 Write-Host 'API:            http://127.0.0.1:3001/health'

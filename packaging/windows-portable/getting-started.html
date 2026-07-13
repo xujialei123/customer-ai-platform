@@ -1,0 +1,476 @@
+<!--
+  @file packaging/windows-portable/getting-started.html
+  @module 数据库、共享包与交付
+  @description 便携包启动后打开的使用说明与配置引导页。
+  @see 联动关注：Start-Customer-AI.ps1、/guide 路由。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>客服 AI 便携包 - 使用与配置引导</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #101828;
+      --muted: #667085;
+      --line: #eaecf0;
+      --soft: #f8fafc;
+      --blue: #175cd3;
+      --blue-soft: #eff4ff;
+      --green: #067647;
+      --green-soft: #ecfdf3;
+      --amber: #b54708;
+      --amber-soft: #fffaeb;
+      --red: #b42318;
+      --red-soft: #fef3f2;
+      --shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #eef4ff 0%, var(--soft) 220px);
+    }
+    header {
+      padding: 28px 24px 18px;
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+    header h1 { margin: 0 0 8px; font-size: 28px; }
+    header p { margin: 0; color: var(--muted); line-height: 1.7; }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 24px 48px;
+    }
+    .status-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 14px;
+      background: #fff;
+      font-size: 13px;
+      box-shadow: var(--shadow);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #98a2b3;
+    }
+    .dot.ok { background: #12b76a; }
+    .dot.warn { background: #f79009; }
+    .dot.bad { background: #f04438; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 18px;
+      margin-top: 22px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .card-head {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #fcfcfd;
+    }
+    .card-head h2 { margin: 0; font-size: 18px; }
+    .card-body { padding: 18px; }
+    .steps { list-style: none; margin: 0; padding: 0; }
+    .step {
+      display: grid;
+      grid-template-columns: 36px 1fr;
+      gap: 14px;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .step:last-child { border-bottom: 0; padding-bottom: 0; }
+    .num {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-weight: 700;
+    }
+    .step h3 { margin: 0 0 6px; font-size: 16px; }
+    .step p, .step li { margin: 0; color: var(--muted); line-height: 1.7; font-size: 14px; }
+    .step ul { margin: 8px 0 0; padding-left: 18px; }
+    code {
+      border-radius: 6px;
+      padding: 2px 6px;
+      background: #eef2f6;
+      color: #344054;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      word-break: break-all;
+    }
+    .links {
+      display: grid;
+      gap: 10px;
+    }
+    .link-btn {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      text-decoration: none;
+      color: var(--ink);
+      background: #fff;
+      transition: border-color .15s, background .15s;
+    }
+    .link-btn:hover { border-color: #84adff; background: var(--blue-soft); }
+    .link-btn small { color: var(--muted); }
+    .notice {
+      margin-top: 18px;
+      border-left: 4px solid var(--amber);
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: var(--amber-soft);
+      color: #7a2e0e;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+    .config-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .config-table th, .config-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .config-table th { color: var(--muted); font-weight: 600; width: 42%; }
+    .allowlist-box {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .allowlist-box h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+    .allowlist-box p {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .allowlist-box label {
+      display: block;
+      margin: 10px 0 6px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .allowlist-box textarea {
+      width: 100%;
+      min-height: 72px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+      font-size: 13px;
+      resize: vertical;
+      background: #fff;
+    }
+    .allowlist-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+      align-items: center;
+    }
+    .allowlist-actions button {
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-secondary { background: #f2f4f7; color: var(--ink); }
+    .allowlist-msg {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .allowlist-msg.ok { color: var(--green); }
+    .allowlist-msg.bad { color: var(--red); }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .tag.ok { background: var(--green-soft); color: var(--green); }
+    .tag.warn { background: var(--amber-soft); color: var(--amber); }
+    .tag.bad { background: var(--red-soft); color: var(--red); }
+    footer {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 24px 28px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>客服 AI 便携包 · 使用与配置引导</h1>
+    <p>按下面步骤完成首次配置。服务启动后，本页会自动检测 API、OpenClaw、知识库和 Chrome 插件连接状态。</p>
+    <div class="status-bar" id="statusBar">
+      <span class="pill"><span class="dot" id="dotApi"></span>API</span>
+      <span class="pill"><span class="dot" id="dotRag"></span>知识库 RAG</span>
+      <span class="pill"><span class="dot" id="dotOpenClaw"></span>OpenClaw</span>
+      <span class="pill"><span class="dot" id="dotExt"></span>Chrome 插件</span>
+      <span class="pill"><span class="dot" id="dotAutoSend"></span>自动发送策略</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid">
+      <section class="card">
+        <div class="card-head"><h2>首次配置流程</h2></div>
+        <div class="card-body">
+          <ol class="steps">
+            <li class="step">
+              <div class="num">1</div>
+              <div>
+                <h3>确认 Docker 已启动</h3>
+                <p>便携包需要 PostgreSQL 和 Redis。若 <code>Start-Customer-AI.bat</code> 能跑到本页，通常表示 Docker 已就绪。</p>
+              </div>
+            </li>
+            <li class="step">
+              <div class="num">2</div>
+              <div>
+                <h3>填写模型与 OpenClaw 配置</h3>
+                <p>编辑便携包根目录 <code>.env</code>，至少配置 LLM / Embedding API Key。OpenClaw 路径<strong>不用填</strong>：启动脚本与 API 会自动使用包内 <code>openclaw/</code> 及其中的 gateway token。</p>
+                <ul>
+                  <li><code>LLM_API_KEY</code> 或 OpenClaw 配置页中的模型 Key</li>
+                  <li><code>OPENCLAW_GATEWAY_URL</code> 默认 <code>http://127.0.0.1:18789</code>（一般无需改）</li>
+                </ul>
+              </div>
+            </li>
+            <li class="step">
+              <div class="num">3</div>
+              <div>
+                <h3>加载 Chrome 扩展</h3>
+                <p>打开 <code>chrome://extensions</code>，开启开发者模式，加载本便携包目录：</p>
+                <p><code>extensions\customer-ai-rpa</code></p>
+              </div>
+            </li>
+            <li class="step">
+              <div class="num">4</div>
+              <div>
+                <h3>登录美团经营宝并开启插件</h3>
+                <p>在 Chrome 中人工登录客服页面。点击插件图标，确认显示「已连接本地服务」，并勾选：</p>
+                <ul>
+                  <li>启用页面监听</li>
+                  <li>自动处理未读会话</li>
+                  <li>允许自动点击发送（测试通过后开启）</li>
+                </ul>
+              </div>
+            </li>
+            <li class="step">
+              <div class="num">5</div>
+              <div>
+                <h3>上传门店知识库</h3>
+                <p>打开知识库管理页，上传门店地址、套餐、退款规则等资料。AI 回复必须基于知识库检索结果。</p>
+              </div>
+            </li>
+            <li class="step">
+              <div class="num">6</div>
+              <div>
+                <h3>配置 RPA 客户白名单</h3>
+                <p>在右侧「客户白名单」中填写可自动回复的客户 ID/昵称。美团灰度建议先加测试客户；<strong>全部清空后表示所有客户都可以回复</strong>。抖音默认也可留空。</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <aside class="card">
+        <div class="card-head"><h2>快捷入口</h2></div>
+        <div class="card-body links">
+          <a class="link-btn" href="http://127.0.0.1:8787/kb-admin" target="_blank" rel="noreferrer">
+            <span>知识库管理</span><small>上传门店资料</small>
+          </a>
+          <a class="link-btn" href="http://127.0.0.1:3001/rpa/extension/status" target="_blank" rel="noreferrer">
+            <span>插件连接状态</span><small>选择器 / 白名单 / 未读</small>
+          </a>
+          <a class="link-btn" href="http://127.0.0.1:18788/" target="_blank" rel="noreferrer">
+            <span>OpenClaw 配置</span><small>模型 Key 与网关</small>
+          </a>
+          <a class="link-btn" href="portable-test-checklist.html" target="_blank" rel="noreferrer">
+            <span>便携包测试清单</span><small>打包后验收（可勾选）</small>
+          </a>
+          <a class="link-btn" href="../docs/project-flow.html" target="_blank" rel="noreferrer">
+            <span>项目流程总览</span><small>开发 / 排障文档</small>
+          </a>
+        </div>
+        <div class="card-body" style="border-top:1px solid var(--line);">
+          <h3 style="margin:0 0 10px;font-size:15px;">当前关键配置</h3>
+          <table class="config-table" id="configTable">
+            <tbody>
+              <tr><th>读取中…</th><td></td></tr>
+            </tbody>
+          </table>
+          <div class="allowlist-box">
+            <h3>客户白名单</h3>
+            <p>每行一个客户 ID 或昵称，也可用英文逗号分隔。清空并保存后，对应平台对所有客户开放自动回复。</p>
+            <label for="meituanAllowlist">美团白名单</label>
+            <textarea id="meituanAllowlist" placeholder="例如：&#10;AXw710416874&#10;QdN473687011"></textarea>
+            <label for="douyinAllowlist">抖音白名单（可留空）</label>
+            <textarea id="douyinAllowlist" placeholder="留空 = 全部客户可回复"></textarea>
+            <div class="allowlist-actions">
+              <button type="button" class="btn-primary" id="saveAllowlistBtn">保存白名单</button>
+              <button type="button" class="btn-secondary" id="clearAllowlistBtn">清空（全部开放）</button>
+              <span class="allowlist-msg" id="allowlistMsg"></span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div class="notice">
+      <strong>安全提示：</strong>便携包默认建议先在草稿模式验证。开启 <code>RPA_AUTO_SEND_ENABLED=true</code> 前，请确认知识库、白名单和发送按钮选择器均正确。
+      不要删除 <code>data</code> 目录，否则登录态会丢失；也不要把客户使用后的整个目录对外转发。
+    </div>
+  </main>
+
+  <footer>
+    日常使用：启动 <code>Start-Customer-AI.bat</code> · 停止 <code>Stop-Customer-AI.bat</code> · 自检 <code>Doctor-Customer-AI.bat</code>
+  </footer>
+
+  <script>
+    function setDot(id, state) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.className = 'dot ' + (state || '');
+    }
+
+    function tag(text, kind) {
+      return '<span class="tag ' + kind + '">' + text + '</span>';
+    }
+
+    function fillAllowlistInputs(data) {
+      const meituan = document.getElementById('meituanAllowlist');
+      const douyin = document.getElementById('douyinAllowlist');
+      if (meituan && document.activeElement !== meituan)
+        meituan.value = (data.config?.meituanAllowedCustomers || []).join('\n');
+      if (douyin && document.activeElement !== douyin)
+        douyin.value = (data.config?.douyinAllowedCustomers || []).join('\n');
+    }
+
+    function allowlistHint(list, enabled) {
+      if (!enabled)
+        return tag('全部开放', 'ok');
+      return (list || []).join(', ') || tag('全部开放', 'ok');
+    }
+
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/guide/status', { cache: 'no-store' });
+        const data = await res.json();
+        setDot('dotApi', data.api?.ok ? 'ok' : 'bad');
+        setDot('dotRag', data.rag?.ok ? 'ok' : 'bad');
+        setDot('dotOpenClaw', data.openclaw?.ok ? 'ok' : (data.openclaw?.configured ? 'warn' : 'bad'));
+        setDot('dotExt', data.extension?.connectedClients > 0 ? 'ok' : 'warn');
+        setDot('dotAutoSend', data.extension?.rpaAutoSendEnabled ? 'ok' : 'warn');
+
+        const rows = [
+          ['AUTO_REPLY_ENABLED', data.config?.autoReplyEnabled ? tag('已开启', 'ok') : tag('未开启', 'warn')],
+          ['RPA_AUTO_SEND_ENABLED', data.config?.rpaAutoSendEnabled ? tag('已开启', 'ok') : tag('未开启', 'warn')],
+          ['MEITUAN_RPA_MODE', data.config?.meituanRpaMode || '-'],
+          ['美团白名单', allowlistHint(data.config?.meituanAllowedCustomers, data.config?.meituanAllowlistEnabled)],
+          ['抖音白名单', allowlistHint(data.config?.douyinAllowedCustomers, data.config?.douyinAllowlistEnabled)],
+          ['发送按钮选择器', data.config?.meituanSendButtonSelector || '-'],
+          ['插件连接数', String(data.extension?.connectedClients ?? 0)],
+          ['自动发送客户端', String(data.extension?.autoSendClients ?? 0)]
+        ];
+        document.querySelector('#configTable tbody').innerHTML = rows
+          .map(([k, v]) => '<tr><th>' + k + '</th><td>' + v + '</td></tr>')
+          .join('');
+        fillAllowlistInputs(data);
+      } catch (error) {
+        setDot('dotApi', 'bad');
+        document.querySelector('#configTable tbody').innerHTML =
+          '<tr><th>状态</th><td>' + tag('无法读取服务状态，请确认 API 已启动', 'bad') + '</td></tr>';
+      }
+    }
+
+    function setAllowlistMsg(text, kind) {
+      const el = document.getElementById('allowlistMsg');
+      if (!el) return;
+      el.className = 'allowlist-msg ' + (kind || '');
+      el.textContent = text || '';
+    }
+
+    async function saveAllowlist(payload) {
+      setAllowlistMsg('保存中…');
+      try {
+        const res = await fetch('/rpa/allowlist', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok)
+          throw new Error(data.error || ('HTTP ' + res.status));
+        const meituanText = data.meituan?.length ? data.meituan.join(',') : '全部开放';
+        const douyinText = data.douyin?.length ? data.douyin.join(',') : '全部开放';
+        setAllowlistMsg('已保存：美团=' + meituanText + '；抖音=' + douyinText, 'ok');
+        await refreshStatus();
+      } catch (error) {
+        setAllowlistMsg('保存失败：' + (error instanceof Error ? error.message : String(error)), 'bad');
+      }
+    }
+
+    document.getElementById('saveAllowlistBtn')?.addEventListener('click', () => {
+      saveAllowlist({
+        meituanText: document.getElementById('meituanAllowlist')?.value || '',
+        douyinText: document.getElementById('douyinAllowlist')?.value || ''
+      });
+    });
+    document.getElementById('clearAllowlistBtn')?.addEventListener('click', () => {
+      const meituan = document.getElementById('meituanAllowlist');
+      const douyin = document.getElementById('douyinAllowlist');
+      if (meituan) meituan.value = '';
+      if (douyin) douyin.value = '';
+      saveAllowlist({ meituanText: '', douyinText: '' });
+    });
+
+    refreshStatus();
+    setInterval(refreshStatus, 8000);
+  </script>
+</body>
+</html>

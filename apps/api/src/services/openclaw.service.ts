@@ -30,6 +30,54 @@ function toCustomerPlainText(content) {
         .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
         .trim();
 }
+
+/**
+ * 拦截把「内部操作说明」当成客服话术发出去的情况。
+ * 知识库里常有“应先…不得猜测…”这类给 AI 看的规则，模型偶发会原样复述。
+ */
+function looksLikeInternalInstruction(text) {
+    const value = String(text ?? '');
+    if (!value)
+        return true;
+    const patterns = [
+        /顾客只说/,
+        /应先礼貌/,
+        /不得猜测/,
+        /不得根据昵称/,
+        /不得编造/,
+        /客服不得/,
+        /AI\s*不得/,
+        /AI 客服不得/,
+        /内部规则|操作说明|系统提示/,
+        /只读订单查询 Adapter/,
+        /不得向客户泄露/,
+        /^答[:：]\s*请提供订单号/m
+    ];
+    // 同时出现多条“规则口吻”时，几乎肯定是内部说明而不是对客回复。
+    const hitCount = patterns.filter((pattern) => pattern.test(value)).length;
+    if (hitCount >= 1 && /不得|应先|顾客只说|Adapter|内部/.test(value))
+        return true;
+    if (/^#{1,6}\s*\d+(\.\d+)*/m.test(value))
+        return true;
+    return false;
+}
+
+function sanitizeCustomerReply(content, userMessage = '') {
+    const plain = toCustomerPlainText(content);
+    if (!plain)
+        return '这个我帮您转人工确认一下。';
+    if (looksLikeInternalInstruction(plain)) {
+        // 订单进度类问题：把内部“先要订单号”规则改写成对客话术。
+        if (/订单|洗好|进度|查一下|查询|衣服/.test(userMessage) || /订单号|查订单|洗好了吗/.test(plain))
+            return '您好，麻烦您提供一下订单号，我帮您查询当前状态。';
+        return '这个我帮您转人工确认一下。';
+    }
+    // 去掉偶发前缀“您好，### 9.x …”这类标题残留。
+    return plain
+        .replace(/^您好[，,]\s*(?:#{1,6}\s*)?\d+(\.\d+)*\s*[^\n]*\n+/u, '您好，')
+        .replace(/^(?:#{1,6}\s*)?\d+(\.\d+)*\s*[^\n]*\n+/u, '')
+        .trim() || '这个我帮您转人工确认一下。';
+}
 export class OpenClawClient {
     /**
      * OpenClaw 只分析扩展生成的脱敏 DOM 结构；模型结果必须回到真实页面验证后才能保存。
@@ -144,7 +192,8 @@ export class OpenClawClient {
             '不要承诺退款、赔偿、免费赠送、特殊折扣。',
             '遇到投诉、差评、退款、食品安全、法律纠纷，必须转人工。',
             '回复要简洁、礼貌、像真人客服。',
-            '只输出纯文本，不要使用 Markdown 标题、粗体、列表或链接语法。'
+            '只输出纯文本，不要使用 Markdown 标题、粗体、列表或链接语法。',
+            '如果知识库内容是内部操作说明（含“应先”“不得猜测”“顾客只说”等），必须改写成面向顾客的短句，禁止原样复述规则文本。'
         ].join('\n');
         const userContent = [
             `客户问题：${input.message}`,
@@ -154,7 +203,7 @@ export class OpenClawClient {
                 ? input.ragContext.map((item, index) => `${index + 1}. ${item.content}`).join('\n')
                 : '无',
             '',
-            '请只根据上面的知识库内容回复客户。'
+            '请只根据上面的知识库内容，直接回复客户可见的话术。'
         ].join('\n');
         // OpenClaw 本地网关当前暴露的是 OpenAI 兼容的 chat_completions 接口。
         // 这里把 RAG 结果塞进用户消息，确保模型不会绕过知识库自由发挥。
@@ -204,7 +253,7 @@ export class OpenClawClient {
                 ?? raw.message
                 ?? '这个我帮您转人工确认一下。';
         return {
-            content: toCustomerPlainText(generatedContent),
+            content: sanitizeCustomerReply(generatedContent, input.message),
             confidence: raw.confidence ?? 0.7,
             raw
         };
@@ -265,10 +314,12 @@ export class OpenClawClient {
         const firstContext = input.ragContext[0]?.content.trim();
         // 旧 apps/api worker 仍然服务于 demo 草稿流；外部模型不可用时，必须坚持“无知识库不回答”。
         // 有命中内容时只截取知识库原文生成建议草稿，避免兜底逻辑编造退款、赔偿等高风险承诺。
+        // 但必须经 sanitize：内部操作说明（“应先/不得猜测”）不能原样发给客户。
+        const drafted = firstContext
+            ? `您好，${firstContext.slice(0, 180)}`
+            : '这个我帮您转人工确认一下。';
         return {
-            content: firstContext
-                ? `您好，${firstContext.slice(0, 180)}`
-                : '这个我帮您转人工确认一下。',
+            content: sanitizeCustomerReply(drafted, input.message),
             confidence: firstContext ? 0.55 : 0,
             raw: {
                 provider: 'local-fallback',

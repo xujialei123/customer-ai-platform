@@ -4,64 +4,162 @@
  * @description WebSocket 连接、设置迁移、多会话路由和断线重连。
  * @see 联动关注：extension-gateway.ts 协议。
  */
-const DEFAULT_SETTINGS = {
-  // 默认只监听和回填；自动点击发送必须由操作员明确开启，并持久化到 Chrome 扩展存储。
-  settingsVersion: 6,
+importScripts('platform-profiles.js');
+
+const GLOBAL_SETTINGS = {
+  settingsVersion: 14,
   enabled: true,
   wsUrl: 'ws://127.0.0.1:3001/rpa/extension/ws',
-  platform: 'meituan',
-  shopId: 'default-shop',
-  messageItemSelector: '.message-cell-container:has(.message-wrapper.left-message)',
-  messageTextSelector: '.text-message.normal-text',
-  outboundMessageItemSelector: '.message-cell-container:has(.message-wrapper.right-message .text-message.shop-text)',
-  outboundMessageTextSelector: '.text-message.shop-text',
-  replyInputSelector: '.dzim-chat-input-container[contenteditable="plaintext-only"]',
-  sendButtonSelector: '.dzim-chat-input-send > button.dzim-button-primary',
-  sessionRootSelector: '.user-center[lx-mv]',
-  customerNameSelector: '.userinfo-name-show',
-  trackingAttribute: 'lx-mv',
-  conversationItemSelector: '.chat-list-item-wrapper,.chat-list-item,.virtual-list-item',
-  conversationUnreadSelector: '.mtd-badge-text.mtd-badge-position',
   autoSwitchConversations: false,
-  autoSend: false,
-  allowedCustomerIds: ''
+  autoSend: false
+};
+
+// 兼容旧版读取逻辑：美团字段仍保留在顶层，避免升级后已有配置丢失。
+const DEFAULT_SETTINGS = {
+  ...GLOBAL_SETTINGS,
+  ...PLATFORM_PROFILES.meituan
 };
 
 let socket;
 let reconnectTimer;
 const sessionTargets = new Map();
 const frameSessions = new Map();
+const pendingDiagnostics = [];
 let connectionState = 'disconnected';
 
-async function getSettings() {
-  // 配置升级采用兼容迁移，不能覆盖用户已经现场确认的真实 DOM 选择器。
-  const saved = await chrome.storage.local.get(DEFAULT_SETTINGS);
-  if (Number(saved.settingsVersion ?? 0) < DEFAULT_SETTINGS.settingsVersion) {
-    // 仅迁移旧版占位选择器；用户以后手工调整过的真实选择器不能被扩展升级覆盖。
-    const migrated = {
-      ...saved,
-      settingsVersion: DEFAULT_SETTINGS.settingsVersion,
-      messageItemSelector: saved.messageItemSelector === '[data-rpa-message-item]' ? DEFAULT_SETTINGS.messageItemSelector : saved.messageItemSelector,
-      messageTextSelector: saved.messageTextSelector === '[data-rpa-message-text]' ? DEFAULT_SETTINGS.messageTextSelector : saved.messageTextSelector,
-      replyInputSelector: saved.replyInputSelector === 'pre[contenteditable="plaintext-only"]'
-        ? DEFAULT_SETTINGS.replyInputSelector
-        : saved.replyInputSelector,
-      // 旧版占位选择器在页面上不存在，会导致“能读消息但点不了发送”；升级时强制换成经营宝真实按钮。
-      sendButtonSelector: !saved.sendButtonSelector
-        || saved.sendButtonSelector.includes('not-configured')
-        || saved.sendButtonSelector === '[data-rpa-send-button]'
-        ? DEFAULT_SETTINGS.sendButtonSelector
-        : saved.sendButtonSelector,
-      conversationItemSelector: !saved.conversationItemSelector || saved.conversationItemSelector === '.chat-list-item'
-        ? DEFAULT_SETTINGS.conversationItemSelector
-        : saved.conversationItemSelector,
-      conversationUnreadSelector: !saved.conversationUnreadSelector || saved.conversationUnreadSelector === '.mtd-badge'
-        ? DEFAULT_SETTINGS.conversationUnreadSelector
-        : saved.conversationUnreadSelector
-    };
-    await chrome.storage.local.set(migrated);
-    return migrated;
+function normalizeDouyinSessionPart(value) {
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .replace(/[\u{1F000}-\u{1FFFF}]/gu, '');
+}
+
+function sessionLookupKeys(session) {
+  const keys = new Set();
+  if (!session?.platform)
+    return [];
+  if (session.conversationId)
+    keys.add(`${session.platform}:${session.conversationId}`);
+  if (session.customerName)
+    keys.add(`${session.platform}:${session.customerName}`);
+  if (session.customerId && session.customerId !== session.conversationId)
+    keys.add(`${session.platform}:${session.customerId}`);
+  return [...keys];
+}
+
+function resolveDraftTarget(session) {
+  for (const key of sessionLookupKeys(session)) {
+    const target = sessionTargets.get(key);
+    if (target)
+      return target;
   }
+  if (session?.platform !== 'douyin')
+    return null;
+  const wanted = normalizeDouyinSessionPart(session.customerName || session.conversationId);
+  if (!wanted)
+    return null;
+  for (const [key, target] of sessionTargets.entries()) {
+    if (!key.startsWith('douyin:'))
+      continue;
+    const registered = normalizeDouyinSessionPart(key.slice('douyin:'.length));
+    if (registered && (registered.includes(wanted) || wanted.includes(registered)))
+      return target;
+  }
+  return null;
+}
+
+function registerSessionTarget(session, tabId, frameId) {
+  const target = { session, tabId, frameId };
+  for (const key of sessionLookupKeys(session))
+    sessionTargets.set(key, target);
+}
+
+function unregisterSessionKeys(keys) {
+  for (const key of keys)
+    sessionTargets.delete(key);
+}
+
+function forwardToServer(message) {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(message));
+    return true;
+  }
+  if (message.type === 'diagnostics')
+    pendingDiagnostics.push(message.payload);
+  return false;
+}
+
+async function reinjectPlatformTabs() {
+  const tabs = await chrome.tabs.query({
+    url: ['https://life.douyin.com/*', 'https://g.dianping.com/*', 'https://ecom.meituan.com/*']
+  });
+  for (const tab of tabs) {
+    if (!tab.id)
+      continue;
+    await injectAllFrames(tab.id);
+    if (/life\.douyin\.com/i.test(tab.url || '')) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        world: 'MAIN',
+        files: ['douyin-main-click.js']
+      }).catch(() => undefined);
+    }
+    chrome.tabs.sendMessage(tab.id, { type: 'rescan' }).catch(() => undefined);
+  }
+}
+
+async function migrateSettings(saved) {
+  const profiles = { ...(saved.platformProfiles || {}) };
+  profiles.meituan = {
+    ...PLATFORM_PROFILES.meituan,
+    shopId: saved.shopId || profiles.meituan?.shopId,
+    messageItemSelector: saved.messageItemSelector === '[data-rpa-message-item]'
+      ? PLATFORM_PROFILES.meituan.messageItemSelector
+      : (saved.messageItemSelector || profiles.meituan?.messageItemSelector),
+    messageTextSelector: saved.messageTextSelector === '[data-rpa-message-text]'
+      ? PLATFORM_PROFILES.meituan.messageTextSelector
+      : (saved.messageTextSelector || profiles.meituan?.messageTextSelector),
+    replyInputSelector: saved.replyInputSelector === 'pre[contenteditable="plaintext-only"]'
+      ? PLATFORM_PROFILES.meituan.replyInputSelector
+      : (saved.replyInputSelector || profiles.meituan?.replyInputSelector),
+    sendButtonSelector: !saved.sendButtonSelector
+      || saved.sendButtonSelector.includes('not-configured')
+      || saved.sendButtonSelector === '[data-rpa-send-button]'
+      ? PLATFORM_PROFILES.meituan.sendButtonSelector
+      : (saved.sendButtonSelector || profiles.meituan?.sendButtonSelector),
+    conversationItemSelector: !saved.conversationItemSelector || saved.conversationItemSelector === '.chat-list-item'
+      ? PLATFORM_PROFILES.meituan.conversationItemSelector
+      : (saved.conversationItemSelector || profiles.meituan?.conversationItemSelector),
+    conversationUnreadSelector: !saved.conversationUnreadSelector || saved.conversationUnreadSelector === '.mtd-badge'
+      ? PLATFORM_PROFILES.meituan.conversationUnreadSelector
+      : (saved.conversationUnreadSelector || profiles.meituan?.conversationUnreadSelector),
+    allowedCustomerIds: profiles.meituan?.allowedCustomerIds ?? saved.allowedCustomerIds ?? ''
+  };
+    profiles.douyin = {
+    ...PLATFORM_PROFILES.douyin,
+    ...profiles.douyin,
+    customerNameSelector: PLATFORM_PROFILES.douyin.customerNameSelector,
+    messageItemSelector: PLATFORM_PROFILES.douyin.messageItemSelector,
+    messageTextSelector: PLATFORM_PROFILES.douyin.messageTextSelector,
+    replyInputSelector: PLATFORM_PROFILES.douyin.replyInputSelector,
+    sendButtonSelector: PLATFORM_PROFILES.douyin.sendButtonSelector,
+    conversationItemSelector: PLATFORM_PROFILES.douyin.conversationItemSelector,
+    conversationUnreadSelector: PLATFORM_PROFILES.douyin.conversationUnreadSelector
+  };
+  const migrated = {
+    ...saved,
+    ...GLOBAL_SETTINGS,
+    settingsVersion: GLOBAL_SETTINGS.settingsVersion,
+    platformProfiles: profiles,
+    ...profiles.meituan
+  };
+  await chrome.storage.local.set(migrated);
+  return migrated;
+}
+
+async function getSettings() {
+  const saved = await chrome.storage.local.get();
+  if (Number(saved.settingsVersion ?? 0) < GLOBAL_SETTINGS.settingsVersion)
+    return migrateSettings({ ...DEFAULT_SETTINGS, ...saved });
   return { ...DEFAULT_SETTINGS, ...saved };
 }
 
@@ -75,7 +173,7 @@ async function connect() {
   // Manifest V3 Service Worker 会休眠，连接函数必须可重复调用并避免创建并行 WebSocket。
   clearTimeout(reconnectTimer);
   const settings = await getSettings();
-  if (!settings.enabled)
+  if (settings.enabled === false)
     return setState('disabled');
   if (socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(socket.readyState))
     return;
@@ -87,13 +185,15 @@ async function connect() {
     send({ type: 'reset_sessions' });
     for (const { session } of sessionTargets.values())
       send({ type: 'hello', payload: session });
+    for (const payload of pendingDiagnostics.splice(0, pendingDiagnostics.length))
+      send({ type: 'diagnostics', payload });
+    void reinjectPlatformTabs();
   });
   socket.addEventListener('message', async (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'draft') {
       // 服务端会带回会话标识，扩展按注册时的 tab/frame 精确投递，避免多客户并发时串话。
-      const key = `${message.session.platform}:${message.session.conversationId}`;
-      const target = sessionTargets.get(key);
+      const target = resolveDraftTarget(message.session);
       if (target)
         chrome.tabs.sendMessage(target.tabId, {
           type: 'applyDraft',
@@ -101,9 +201,31 @@ async function connect() {
           payload: message.payload
         }, { frameId: target.frameId }).catch(() => undefined);
     }
-    if (message.type === 'connected' && message.payload?.meituanAllowedCustomers) {
-      // 服务端是最终白名单来源；扩展只做前置过滤，真正安全边界仍在 API。
-      chrome.storage.local.set({ allowedCustomerIds: message.payload.meituanAllowedCustomers.join(',') });
+    if (message.type === 'connected') {
+      const profiles = { ...(await chrome.storage.local.get('platformProfiles')).platformProfiles || {} };
+      // 必须用 Array.isArray：空数组表示「允许全部」，也要写回，否则会继续沿用旧白名单。
+      if (Array.isArray(message.payload?.meituanAllowedCustomers)) {
+        profiles.meituan = {
+          ...PLATFORM_PROFILES.meituan,
+          ...profiles.meituan,
+          allowedCustomerIds: message.payload.meituanAllowedCustomers.join(',')
+        };
+      }
+      if (Array.isArray(message.payload?.douyinAllowedCustomers)) {
+        profiles.douyin = {
+          ...PLATFORM_PROFILES.douyin,
+          ...profiles.douyin,
+          allowedCustomerIds: message.payload.douyinAllowedCustomers.join(',')
+        };
+      } else {
+        profiles.douyin = {
+          ...PLATFORM_PROFILES.douyin,
+          ...profiles.douyin,
+          allowedCustomerIds: profiles.douyin?.allowedCustomerIds ?? ''
+        };
+      }
+      if (Object.keys(profiles).length)
+        await chrome.storage.local.set({ platformProfiles: profiles });
     }
   });
   socket.addEventListener('close', () => {
@@ -114,9 +236,7 @@ async function connect() {
 }
 
 function send(message) {
-  // 断线期间不缓存平台消息，页面扫描器会在重连后按 messageId 再次发现并由数据库去重。
-  if (socket?.readyState === WebSocket.OPEN)
-    socket.send(JSON.stringify(message));
+  forwardToServer(message);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -127,15 +247,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const previousKey = frameSessions.get(frameKey);
     if (previousKey && previousKey !== key) {
       const previous = sessionTargets.get(previousKey);
-      if (previous)
+      if (previous) {
         send({ type: 'remove_session', payload: previous.session });
-      sessionTargets.delete(previousKey);
+        unregisterSessionKeys(sessionLookupKeys(previous.session));
+      }
     }
     frameSessions.set(frameKey, key);
-    sessionTargets.set(key, { session: message.payload, tabId: sender.tab?.id, frameId: sender.frameId ?? 0 });
+    registerSessionTarget(message.payload, sender.tab?.id, sender.frameId ?? 0);
     // 门店 ID 来自经营宝当前会话埋点；同步到存储后弹窗和后续消息使用同一个真实值。
-    if (message.payload.shopId && message.payload.shopId !== 'default-shop')
-      chrome.storage.local.set({ shopId: message.payload.shopId, detectedShopId: message.payload.shopId });
+    if (message.payload.shopId && message.payload.shopId !== 'default-shop') {
+      if (message.payload.platform === 'douyin') {
+        chrome.storage.local.get('platformProfiles').then((stored) => {
+          const profiles = stored.platformProfiles || {};
+          profiles.douyin = { ...PLATFORM_PROFILES.douyin, ...profiles.douyin, shopId: message.payload.shopId };
+          chrome.storage.local.set({ platformProfiles: profiles, detectedShopId: message.payload.shopId });
+        });
+      } else {
+        chrome.storage.local.set({ shopId: message.payload.shopId, detectedShopId: message.payload.shopId });
+      }
+    }
     send({ type: 'hello', payload: message.payload });
   }
   if (message.type === 'clearFrameSession') {
@@ -144,9 +274,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const previousKey = frameSessions.get(frameKey);
     if (previousKey) {
       const previous = sessionTargets.get(previousKey);
-      if (previous)
+      if (previous) {
         send({ type: 'remove_session', payload: previous.session });
-      sessionTargets.delete(previousKey);
+        unregisterSessionKeys(sessionLookupKeys(previous.session));
+      }
       frameSessions.delete(frameKey);
     }
   }
@@ -155,15 +286,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'outbound')
     send({ type: 'outbound', requestId: message.requestId, payload: message.payload });
   if (message.type === 'diagnostics')
-    send({ type: 'diagnostics', payload: message.payload });
+    forwardToServer({ type: 'diagnostics', payload: message.payload });
   if (message.type === 'draft_send_result')
     send({ type: 'draft_send_result', payload: message.payload });
   if (message.type === 'settingsChanged') {
     socket?.close();
     void connect();
+    void reinjectPlatformTabs();
   }
   if (message.type === 'getStatus')
     sendResponse({ state: connectionState, sessionCount: sessionTargets.size, sessions: [...sessionTargets.values()].map((item) => item.session) });
+  if (message.type === 'douyinMainClick') {
+    const tabId = sender.tab?.id;
+    if (!tabId)
+      return;
+    chrome.scripting.executeScript({
+      target: { tabId, frameIds: [sender.frameId ?? 0] },
+      world: 'MAIN',
+      files: ['douyin-main-click.js']
+    }).then(() => chrome.scripting.executeScript({
+      target: { tabId, frameIds: [sender.frameId ?? 0] },
+      world: 'MAIN',
+      func: (nameHint) => globalThis.__customerAiClickDouyinCard?.(nameHint),
+      args: [message.nameHint || '']
+    })).catch(() => undefined);
+    sendResponse({ ok: true });
+    return true;
+  }
   if (message.type === 'ensureConnection') {
     void connect();
     sendResponse({ ok: true });
@@ -177,11 +326,13 @@ chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.set({ ...DEFAULT_SETTINGS, ...existing });
   await chrome.alarms.create('rpa-reconnect', { periodInMinutes: 0.5 });
   void connect();
+  void reinjectPlatformTabs();
 });
 chrome.runtime.onStartup.addListener(() => {
   // 浏览器重启后 Service Worker 是全新进程，必须主动恢复 WebSocket，而不能等待用户打开扩展。
   chrome.alarms.create('rpa-reconnect', { periodInMinutes: 0.5 });
   void connect();
+  void reinjectPlatformTabs();
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'rpa-reconnect' && socket?.readyState !== WebSocket.OPEN)
@@ -191,7 +342,7 @@ async function injectAllFrames(tabId) {
   // 经营宝使用动态 frame 和 Shadow DOM，主动注入用于补充静态 content_scripts 可能漏掉的子页面。
   try {
     // 经营宝聊天区由动态 iframe 承载，按 frameId 主动注入可以覆盖 blob/about:blank 等静态规则漏掉的页面。
-    await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['platform-profiles.js', 'content.js'] });
   } catch {
     // 登录页、浏览器内部页或尚未授权的 frame 会拒绝注入，不影响其他已授权经营宝 frame。
   }
@@ -215,13 +366,20 @@ async function reportFrameMap(tabId) {
 }
 
 chrome.webNavigation.onCompleted.addListener((details) => {
-  if (!/^https:\/\/g\.dianping\.com\//.test(details.url))
+  if (!/^https:\/\/g\.dianping\.com\//.test(details.url) && !/^https:\/\/life\.douyin\.com\//.test(details.url))
     return;
   // 聊天 iframe 在顶层页面完成后才动态创建，必须在每个子 frame 自己完成时按 frameId 注入。
   chrome.scripting.executeScript({
     target: { tabId: details.tabId, frameIds: [details.frameId] },
-    files: ['content.js']
+    files: ['platform-profiles.js', 'content.js']
   }).catch(() => undefined);
+  if (/^https:\/\/life\.douyin\.com\//.test(details.url)) {
+    chrome.scripting.executeScript({
+      target: { tabId: details.tabId, frameIds: [details.frameId] },
+      world: 'MAIN',
+      files: ['douyin-main-click.js']
+    }).catch(() => undefined);
+  }
   void reportFrameMap(details.tabId);
 });
 

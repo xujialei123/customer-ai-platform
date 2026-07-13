@@ -113,24 +113,28 @@ try {
   $ragTarget = $env:CUSTOMER_AI_PACKAGE_ROOT + '\app\rag-service'
   Write-Host ('API deploy path: ' + $backendTarget) -ForegroundColor DarkGray
   Remove-Item -LiteralPath $backendTarget -Recurse -Force -ErrorAction SilentlyContinue
-  Invoke-Pnpm @('--config.node-linker=hoisted', '--filter', '@customer-ai/api', 'deploy', '--legacy', $backendTarget, '--prod')
+  Invoke-Pnpm @('--config.node-linker=hoisted', '--filter', '@customer-ai/api', 'deploy', $backendTarget, '--prod')
 
   Write-Host ('RAG deploy path: ' + $ragTarget) -ForegroundColor DarkGray
   Remove-Item -LiteralPath $ragTarget -Recurse -Force -ErrorAction SilentlyContinue
-  Invoke-Pnpm @('--config.node-linker=hoisted', '--filter', '@customer-ai/rag-service', 'deploy', '--legacy', $ragTarget, '--prod')
+  Invoke-Pnpm @('--config.node-linker=hoisted', '--filter', '@customer-ai/rag-service', 'deploy', $ragTarget, '--prod')
 } finally { Pop-Location }
 
 # pnpm deploy 有时只复制依赖包，Prisma 生成物可能在 .prisma/client，也可能在 @prisma/client 包内。
 # 两种布局都兼容，确保便携包离开开发机后仍能直接启动。
-$prismaDirs = Get-ChildItem -LiteralPath (Join-Path $Root 'node_modules') -Directory -Filter '.prisma' -Recurse -ErrorAction SilentlyContinue
-$generatedPrisma = $prismaDirs | Where-Object { $_ -and $_.FullName -and (Test-Path -LiteralPath (Join-Path $_.FullName 'client')) } | Select-Object -First 1 -ExpandProperty FullName
-if ($generatedPrisma) {
-  Copy-Tree $generatedPrisma (Join-Path $PackageRoot 'app\backend\node_modules\.prisma')
+$prismaClientDir = Get-ChildItem -LiteralPath (Join-Path $Root 'node_modules\.pnpm') -Recurse -Directory -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -eq 'client' -and $_.Parent.Name -eq '.prisma' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'default.js')) } |
+  Select-Object -First 1 -ExpandProperty FullName
+if ($prismaClientDir) {
+  Copy-Tree (Split-Path -Parent $prismaClientDir) (Join-Path $PackageRoot 'app\backend\node_modules\.prisma')
 } else {
-  $prismaScopes = Get-ChildItem -LiteralPath (Join-Path $Root 'node_modules\.pnpm') -Directory -Filter '@prisma' -Recurse -ErrorAction SilentlyContinue
-  $generatedPrismaClient = $prismaScopes | Where-Object { $_ -and $_.FullName -and (Test-Path -LiteralPath (Join-Path $_.FullName 'client\index.js')) } | Select-Object -First 1 -ExpandProperty FullName
-  if (-not $generatedPrismaClient) { throw 'Generated Prisma client is missing. Run prisma generate before packaging.' }
-  Copy-Tree (Join-Path $generatedPrismaClient 'client') (Join-Path $PackageRoot 'app\backend\node_modules\@prisma\client')
+  $prismaDirs = Get-ChildItem -LiteralPath (Join-Path $Root 'node_modules') -Directory -Filter '.prisma' -Recurse -ErrorAction SilentlyContinue
+  $generatedPrisma = $prismaDirs | Where-Object { $_ -and $_.FullName -and (Test-Path -LiteralPath (Join-Path $_.FullName 'client')) } | Select-Object -First 1 -ExpandProperty FullName
+  if ($generatedPrisma) {
+    Copy-Tree $generatedPrisma (Join-Path $PackageRoot 'app\backend\node_modules\.prisma')
+  } else {
+    throw 'Generated Prisma client is missing. Run prisma generate before packaging.'
+  }
 }
 
 Write-Host '3/6 Copying sanitized OpenClaw runtime...' -ForegroundColor Cyan
@@ -157,8 +161,9 @@ $values = [ordered]@{
   LLM_PROVIDER = 'openclaw'
   OPENCLAW_GATEWAY_URL = 'http://127.0.0.1:18789'
   OPENCLAW_TOKEN = ''
-  OPENCLAW_PORTABLE_ROOT = '.\openclaw'
-  OPENCLAW_TOKEN_FILE = '.\openclaw\data\.openclaw\gateway-token.txt'
+  # Leave portable OpenClaw paths empty; runtime auto-discovers .\openclaw relative to package root.
+  OPENCLAW_PORTABLE_ROOT = ''
+  OPENCLAW_TOKEN_FILE = ''
   OPENCLAW_AUTO_START = 'true'
   OPENCLAW_TIMEOUT_MS = '30000'
   ORDER_ADAPTER_MODE = 'mock'

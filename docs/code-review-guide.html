@@ -1,0 +1,941 @@
+<!--
+  @file docs/code-review-guide.html
+  @module 后台、文档、样例
+  @description 代码整体梳理顺序与文件职责导览（浏览器直接打开，可勾选进度）。
+  @see 联动关注：project-walkthrough.md、project-flow.html、project-files.js。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>代码整体梳理指南 - 多平台 AI 客服中台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #101828;
+      --muted: #667085;
+      --line: #e4e7ec;
+      --soft: #f8fafc;
+      --card: #ffffff;
+      --blue: #175cd3;
+      --blue-soft: #eff4ff;
+      --green: #067647;
+      --green-soft: #ecfdf3;
+      --amber: #b54708;
+      --amber-soft: #fffaeb;
+      --violet: #5925dc;
+      --violet-soft: #f4f3ff;
+      --shadow: 0 8px 24px rgba(16, 24, 40, 0.06);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% -10%, #dbeafe 0%, transparent 42%),
+        radial-gradient(circle at 90% 0%, #ede9fe 0%, transparent 36%),
+        var(--soft);
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 28px;
+      border-bottom: 1px solid #1f2a37;
+      background: #0f172a;
+      color: #fff;
+    }
+    header h1 { margin: 0; font-size: 18px; }
+    header p { margin: 4px 0 0; color: #94a3b8; font-size: 12px; }
+    .progress-wrap {
+      min-width: 220px;
+      text-align: right;
+    }
+    .progress-wrap strong { display: block; font-size: 12px; color: #cbd5e1; }
+    .bar {
+      height: 8px;
+      margin-top: 8px;
+      border-radius: 999px;
+      background: #334155;
+      overflow: hidden;
+    }
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #38bdf8, #818cf8);
+      transition: width .25s ease;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      max-width: 1280px;
+      margin: 0 auto;
+      min-height: calc(100vh - 72px);
+    }
+    nav {
+      position: sticky;
+      top: 72px;
+      align-self: start;
+      height: calc(100vh - 72px);
+      overflow: auto;
+      padding: 18px 12px;
+      border-right: 1px solid var(--line);
+      background: rgba(255,255,255,.88);
+      backdrop-filter: blur(8px);
+    }
+    nav strong {
+      display: block;
+      padding: 0 10px 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    nav a {
+      display: block;
+      margin: 2px 0;
+      border-radius: 8px;
+      padding: 9px 10px;
+      color: #344054;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    nav a:hover, nav a.active { background: var(--blue-soft); color: var(--blue); }
+    main { padding: 28px 30px 80px; }
+    .hero {
+      margin-bottom: 28px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 24px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+    }
+    .hero h2 { margin: 0 0 10px; font-size: 26px; }
+    .hero p { margin: 0; color: var(--muted); line-height: 1.7; max-width: 860px; }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .chip {
+      border-radius: 999px;
+      padding: 6px 12px;
+      background: var(--violet-soft);
+      color: var(--violet);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .links a {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 12px;
+      background: #fff;
+      color: var(--blue);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    section {
+      margin-bottom: 28px;
+      scroll-margin-top: 90px;
+    }
+    .step-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .step-head {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fcfcfd, #f8fafc);
+    }
+    .num {
+      flex: 0 0 40px;
+      height: 40px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 800;
+    }
+    .step-head h3 { margin: 0 0 6px; font-size: 18px; }
+    .step-head p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .step-body { padding: 18px 20px 8px; }
+    .goal {
+      margin: 0 0 14px;
+      border-left: 4px solid var(--amber);
+      padding: 10px 12px;
+      background: var(--amber-soft);
+      color: #7a2e0e;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .file {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: #fff;
+    }
+    .file.done { border-color: #abefc6; background: #f6fef9; }
+    .file input { margin-top: 3px; width: 16px; height: 16px; }
+    .path {
+      color: var(--blue);
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      word-break: break-all;
+    }
+    .meta { margin-top: 6px; color: #344054; font-size: 13px; line-height: 1.6; }
+    .hint { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .tag {
+      display: inline-block;
+      margin-left: 6px;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .tag.must { background: var(--red-soft, #fef3f2); color: #b42318; background: #fef3f2; }
+    .tag.core { background: var(--blue-soft); color: var(--blue); }
+    .tag.optional { background: #f2f4f7; color: #475467; }
+    .flow {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      margin: 0 0 14px;
+    }
+    .flow .box {
+      flex: 1 0 120px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .flow .box small { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; }
+    .arrow { display: grid; place-items: center; color: #98a2b3; font-weight: 800; }
+    .map {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .map .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      background: #fff;
+    }
+    .map h4 { margin: 0 0 6px; font-size: 14px; }
+    .map p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 8px 12px;
+      background: #111827;
+      color: #fff;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button.secondary { background: #eef2f7; color: #344054; }
+    footer {
+      margin-top: 20px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .map { grid-template-columns: 1fr; }
+      header { position: static; flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>代码整体梳理指南</h1>
+      <p>按顺序读、按文件勾选。进度保存在本机浏览器 localStorage。</p>
+    </div>
+    <div class="progress-wrap">
+      <strong id="progressText">已完成 0 / 0</strong>
+      <div class="bar"><span id="progressBar"></span></div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav>
+      <strong>阅读顺序</strong>
+      <a href="#overview">0. 先建立地图</a>
+      <a href="#step0">1. 规则与边界</a>
+      <a href="#step1">2. 启动与基础设施</a>
+      <a href="#step2">3. API 入口</a>
+      <a href="#step3">4. 消息主链路</a>
+      <a href="#step4">5. 回复 Worker</a>
+      <a href="#step5">6. RAG 知识库</a>
+      <a href="#step6">7. Chrome RPA</a>
+      <a href="#step7">8. 企微 / 订单 / 风控</a>
+      <a href="#step8">9. 交付与文档</a>
+      <a href="#appendix">附录：目录速查</a>
+      <a href="project-flow.html">流程总览 ↗</a>
+      <a href="project-walkthrough.md">文字版 walkthrough ↗</a>
+    </nav>
+
+    <main>
+      <div class="hero" id="overview">
+        <h2>怎么用这份文档</h2>
+        <p>
+          这个项目大部分代码是按「平台接入 → 统一消息 → RAG/订单 → 草稿 → 回填发送」搭的。
+          不要从某个平台页面或某个选择器开始读，否则会把<strong>兼容旧代码</strong>和<strong>当前主链路</strong>搅在一起。
+          建议每天只做 1～2 步，打开文件时只问三件事：它从哪来、干什么、把结果交给谁。
+        </p>
+        <div class="chip-row">
+          <span class="chip">主链路：扩展/Webhook → API → Worker → RAG → 草稿 → 插件发送</span>
+          <span class="chip">必读优先：带「必读」标签的文件</span>
+          <span class="chip">可跳过：Playwright 旧 watcher、旧 knowledge 兼容层</span>
+        </div>
+        <div class="flow" style="margin-top:18px">
+          <div class="box">平台消息<small>企微 / 抖音 / 美团</small></div>
+          <div class="arrow">→</div>
+          <div class="box">Adapter<small>统一消息</small></div>
+          <div class="arrow">→</div>
+          <div class="box">MessageService<small>去重入库</small></div>
+          <div class="arrow">→</div>
+          <div class="box">ReplyWorker<small>订单/RAG</small></div>
+          <div class="arrow">→</div>
+          <div class="box">Draft<small>风控/草稿</small></div>
+          <div class="arrow">→</div>
+          <div class="box">插件发送<small>回填/点击</small></div>
+        </div>
+        <div class="map">
+          <div class="card"><h4>apps/api</h4><p>主 API：路由、会话、队列、草稿、扩展网关、企微、订单。</p></div>
+          <div class="card"><h4>services/rag-service</h4><p>独立知识库服务：上传、Wiki/卡片、Hybrid 检索、回答。</p></div>
+          <div class="card"><h4>extensions/customer-ai-rpa</h4><p>Chrome 插件：读 DOM、切会话、回填、点发送。</p></div>
+        </div>
+        <div class="toolbar">
+          <button type="button" id="resetProgress" class="secondary">清空勾选进度</button>
+          <button type="button" id="markMust" class="secondary">只展开必读项提示</button>
+        </div>
+        <div class="links">
+          <a href="project-flow.html" target="_blank" rel="noreferrer">项目流程总览</a>
+          <a href="deployment-guide.html" target="_blank" rel="noreferrer">部署手册</a>
+          <a href="../AGENTS.md" target="_blank" rel="noreferrer">AGENTS.md 开发约束</a>
+          <a href="http://127.0.0.1:3001/guide" target="_blank" rel="noreferrer">本地引导页 /guide</a>
+        </div>
+      </div>
+
+      <!-- STEP 0 -->
+      <section id="step0">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">1</div>
+            <div>
+              <h3>规则与边界（先读，再动代码）</h3>
+              <p>先弄清「允许做什么 / 禁止做什么」，避免梳理时被误导成可以自动乱发消息。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <p class="goal">目标：理解 UTF-8、风控、默认不自动发送、Adapter 必须统一接入。</p>
+            <label class="file" data-id="s0-agents">
+              <input type="checkbox" />
+              <div>
+                <div class="path">AGENTS.md <span class="tag must">必读</span></div>
+                <div class="meta">AI/人工开发约束：编码、中文注释、架构链路、风控、文档同步规则。</div>
+                <div class="hint">梳理时把它当“宪法”。后面看到自动发送、退款承诺、跳过知识库，都要对照这里。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s0-tasks">
+              <input type="checkbox" />
+              <div>
+                <div class="path">tasks.md <span class="tag core">核心</span></div>
+                <div class="meta">分阶段任务清单：先能启动 → 数据库 → 消息 → RAG → 草稿 → Adapter。</div>
+                <div class="hint">用来理解「当初为什么先做 A 再做 B」，不是现在还要按它全部重做一遍。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s0-readme">
+              <input type="checkbox" />
+              <div>
+                <div class="path">README.md <span class="tag must">必读</span></div>
+                <div class="meta">项目入口：架构一句话、启动方式、端口、知识库页面、RPA 扩展说明。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s0-risk">
+              <input type="checkbox" />
+              <div>
+                <div class="path">docs/rpa-limitations-and-risks.md <span class="tag core">核心</span></div>
+                <div class="meta">RPA 能力边界与风险口径：哪些已验证、哪些仍依赖真实账号。</div>
+              </div>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <!-- STEP 1 -->
+      <section id="step1">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">2</div>
+            <div>
+              <h3>启动与基础设施</h3>
+              <p>搞清楚 <code>pnpm dev</code> 到底起了哪些进程，数据存在哪。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <p class="goal">目标：能自己画出「Docker / API 3001 / RAG 8787 / Mock 3100 / OpenClaw」关系图。</p>
+            <label class="file" data-id="s1-pkg">
+              <input type="checkbox" />
+              <div>
+                <div class="path">package.json <span class="tag must">必读</span></div>
+                <div class="meta">工作区脚本入口：dev、构建、迁移、便携包命令。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s1-runall">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/dev/run-all.ts <span class="tag must">必读</span></div>
+                <div class="meta">开发编排器：Docker、OpenClaw、API、RAG、Mock、专用 Chrome。</div>
+                <div class="hint">梳理排障时优先看这里，很多“端口被占用”问题源头在这。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s1-docker">
+              <input type="checkbox" />
+              <div>
+                <div class="path">docker-compose.yml <span class="tag core">核心</span></div>
+                <div class="meta">PostgreSQL(pgvector, 宿主机 5433) + Redis(6379)。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s1-env">
+              <input type="checkbox" />
+              <div>
+                <div class="path">.env.example → .env <span class="tag must">必读</span></div>
+                <div class="meta">环境变量模板：自动发送开关、白名单、OpenClaw、订单后台、RAG Key。</div>
+                <div class="hint">改完 .env 通常要重启 pnpm dev。白名单也可在 /guide 页运行时改。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s1-initdb">
+              <input type="checkbox" />
+              <div>
+                <div class="path">scripts/init-db.sql <span class="tag core">核心</span></div>
+                <div class="meta">RAG 侧 Wiki/Card/Graph/Gap 与向量相关表初始化。</div>
+              </div>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <!-- STEP 2 -->
+      <section id="step2">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">3</div>
+            <div>
+              <h3>主 API 入口</h3>
+              <p>从 Fastify 启动点往下看：路由注册、环境变量、数据库、队列。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <p class="goal">目标：打开任意路由文件时，知道它挂在 main.ts 的哪一层。</p>
+            <label class="file" data-id="s2-main">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/main.ts <span class="tag must">必读</span></div>
+                <div class="meta">创建 Fastify，注册路由、ReplyWorker、RPA WebSocket；过滤轮询访问日志。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s2-envts">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/config/env.ts <span class="tag must">必读</span></div>
+                <div class="meta">UTF-8 读根目录 .env + zod 校验。布尔开关不能用 Boolean("false")。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s2-prisma">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/lib/prisma.ts + apps/api/prisma/schema.prisma <span class="tag must">必读</span></div>
+                <div class="meta">业务库：会话、消息、草稿等。先看 schema，再看 Service 怎么查。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s2-queue">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/lib/queue.ts <span class="tag must">必读</span></div>
+                <div class="meta">BullMQ inbound-message 队列。新消息入库后丢进这里等 ReplyWorker。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s2-routes">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/routes/*.ts <span class="tag core">核心</span></div>
+                <div class="meta">HTTP 入口：health / rpa / reply-drafts / webhooks.wecom / guide / orders…</div>
+                <div class="hint">建议优先读：rpa.ts、reply-drafts.ts、guide.ts、webhooks.wecom.ts。</div>
+              </div>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <!-- STEP 3 -->
+      <section id="step3">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">4</div>
+            <div>
+              <h3>消息主链路：Adapter → 会话 → 入库</h3>
+              <p>所有平台消息最终都变成 UnifiedMessage，再进入同一套会话隔离。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <p class="goal">目标：能手绘「抖音插件 inbound」与「企微 webhook」如何汇合到 MessageService。</p>
+            <label class="file" data-id="s3-shared">
+              <input type="checkbox" />
+              <div>
+                <div class="path">packages/shared/src/index.ts <span class="tag core">核心</span></div>
+                <div class="meta">跨包共享类型（平台、消息结构等）。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s3-adapters">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/adapters/* <span class="tag must">必读</span></div>
+                <div class="meta">douyin-rpa / meituan-rpa / wecom：把平台原始 payload 转 UnifiedMessage。</div>
+                <div class="hint">index.ts 负责按 platform 选 Adapter。新平台只加 Adapter，不要让 OpenClaw 直连平台。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s3-conv">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/services/conversation.service.ts <span class="tag must">必读</span></div>
+                <div class="meta">按 platform + shopId + platformConversationId 找/建会话。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s3-msg">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/services/message.service.ts <span class="tag must">必读</span></div>
+                <div class="meta">inbound 去重入库、outbound 确认、匹配草稿标记 sent。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s3-rpa-route">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/routes/rpa.ts <span class="tag must">必读</span></div>
+                <div class="meta">/rpa/inbound、/rpa/outbound、扩展状态、白名单读写入口。</div>
+              </div>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <!-- STEP 4 -->
+      <section id="step4">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">5</div>
+            <div>
+              <h3>ReplyWorker：回复大脑</h3>
+              <p>队列消费者：订单优先，否则 RAG，再 OpenClaw，再风控，最后写草稿。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <p class="goal">目标：看懂一次「你好」从队列到草稿的分支判断。</p>
+            <label class="file" data-id="s4-worker">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/workers/reply.worker.ts <span class="tag must">必读</span></div>
+                <div class="meta">回复主链路排障入口。先订单路由，非订单才 RAG → OpenClaw → Safety → ReplyDraft。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s4-rag-api">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/services/rag.service.ts <span class="tag core">核心</span></div>
+                <div class="meta">API 侧调用 8787 Hybrid 检索的客户端封装。</div>
+                <div class="hint">真正的检索实现不在这里，而在 services/rag-service。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s4-openclaw">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/services/openclaw.service.ts <span class="tag must">必读</span></div>
+                <div class="meta">调用 OpenClaw 生成回复；失败有本地兜底草稿。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s4-safety">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/services/safety.service.ts <span class="tag must">必读</span></div>
+                <div class="meta">高风险转人工、禁止承诺、能否自动发送判定。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s4-drafts">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/routes/reply-drafts.ts <span class="tag must">必读</span></div>
+                <div class="meta">草稿查询 / 批准 / 拒绝 / mark-sent；alreadyReplied 防重推。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s4-log">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/utils/terminal-log.ts <span class="tag core">核心</span></div>
+                <div class="meta">终端彩色业务日志：收到消息、检索、草稿、推送、点击结果。</div>
+              </div>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <!-- STEP 5 -->
+      <section id="step5">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">6</div>
+            <div>
+              <h3>RAG 知识库（8787）</h3>
+              <p>知识上传、Wiki/卡片编译、Hybrid 检索、回答生成。这是「AI 不能瞎编」的根基。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <p class="goal">目标：分清「编译入库」和「在线检索回答」两条线。</p>
+            <label class="file" data-id="s5-main">
+              <input type="checkbox" />
+              <div>
+                <div class="path">services/rag-service/src/main.ts <span class="tag must">必读</span></div>
+                <div class="meta">RAG 服务启动入口。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s5-api">
+              <input type="checkbox" />
+              <div>
+                <div class="path">services/rag-service/src/routes/api.ts <span class="tag must">必读</span></div>
+                <div class="meta">KB / 编译 / 卡片 / Graph / Gap / 检索 / 回答 API。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s5-admin">
+              <input type="checkbox" />
+              <div>
+                <div class="path">services/rag-service/public/kb-admin.html <span class="tag core">核心</span></div>
+                <div class="meta">知识库管理页 UI：上传、编译、检索测试。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s5-brain">
+              <input type="checkbox" />
+              <div>
+                <div class="path">services/rag-service/src/brain/* <span class="tag must">必读</span></div>
+                <div class="meta">GBrain：文档解析 → Wiki → Knowledge Card → Graph → Gap。</div>
+                <div class="hint">优先读 brain-sync.ts、knowledge-store.ts、knowledge-card-generator.ts。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s5-hybrid">
+              <input type="checkbox" />
+              <div>
+                <div class="path">services/rag-service/src/rag/* <span class="tag must">必读</span></div>
+                <div class="meta">Hybrid 检索：改写、意图、向量+关键词融合、rerank、answer、fallback。</div>
+                <div class="hint">入口 rag-service.ts；检索核心 hybrid-retriever.ts；无答案 fallback.ts。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s5-compat">
+              <input type="checkbox" />
+              <div>
+                <div class="path">services/rag-service/src/services/rag-application.ts 等 <span class="tag optional">可选</span></div>
+                <div class="meta">旧 Chunk 兼容链路。新功能优先卡片 Hybrid，不要再分叉第三套。</div>
+              </div>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <!-- STEP 6 -->
+      <section id="step6">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">7</div>
+            <div>
+              <h3>Chrome 扩展 RPA（当前默认）</h3>
+              <p>美团经营宝 / 抖音来客：在已登录浏览器里读 DOM，经 WebSocket 连本地 API。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <p class="goal">目标：能说明「谁扫描消息、谁推草稿、谁点发送」，以及白名单如何生效。</p>
+            <label class="file" data-id="s6-gateway">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/rpa/extension-gateway.ts <span class="tag must">必读</span></div>
+                <div class="meta">本地 WebSocket 网关：会话注册、草稿轮询推送、点击回执、mark-sent。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s6-allow">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/rpa/customer-allowlist.ts + allowlist-config.ts <span class="tag must">必读</span></div>
+                <div class="meta">白名单判断；空列表 = 全部客户可回复；配置页可运行时修改。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s6-bg">
+              <input type="checkbox" />
+              <div>
+                <div class="path">extensions/customer-ai-rpa/background.js <span class="tag must">必读</span></div>
+                <div class="meta">扩展 Service Worker：连 WS、会话路由、把 draft 投到正确 tab/frame。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s6-content">
+              <input type="checkbox" />
+              <div>
+                <div class="path">extensions/customer-ai-rpa/content.js <span class="tag must">必读</span></div>
+                <div class="meta">页面脚本：扫未读、切换会话、回填输入框、点发送；抖音历史 Tab 暂停。</div>
+                <div class="hint">这是 RPA 最复杂的文件，建议边看边对照 /rpa/extension/status 的 diagnostics。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s6-profile">
+              <input type="checkbox" />
+              <div>
+                <div class="path">extensions/customer-ai-rpa/platform-profiles.js <span class="tag core">核心</span></div>
+                <div class="meta">美团/抖音 DOM 选择器预设与 URL 平台识别。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s6-mainclick">
+              <input type="checkbox" />
+              <div>
+                <div class="path">extensions/customer-ai-rpa/douyin-main-click.js <span class="tag core">核心</span></div>
+                <div class="meta">MAIN world 点击抖音会话卡片（绕过隔离世界事件失效）。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s6-popup">
+              <input type="checkbox" />
+              <div>
+                <div class="path">extensions/customer-ai-rpa/popup.* <span class="tag core">核心</span></div>
+                <div class="meta">插件弹窗：开关、自动切换、自动发送、选择器配置。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s6-old">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/rpa/*watcher*.ts <span class="tag optional">可选/兼容</span></div>
+                <div class="meta">旧 Playwright watcher。默认不要与插件同时跑，避免双通道重复回复。</div>
+              </div>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <!-- STEP 7 -->
+      <section id="step7">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">8</div>
+            <div>
+              <h3>企微、订单、风控配置</h3>
+              <p>官方接口通路与「不能胡编订单状态」的安全边界。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <p class="goal">目标：区分官方 Webhook 与 RPA；订单查询失败必须转人工话术。</p>
+            <label class="file" data-id="s7-wecom">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/routes/webhooks.wecom.ts + wecom-*.service.ts <span class="tag core">核心</span></div>
+                <div class="meta">企微回调验签/解密、发送客户端。默认 AUTO_REPLY_ENABLED=false。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s7-order">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/services/order.service.ts <span class="tag must">必读</span></div>
+                <div class="meta">订单号/手机号识别、公司后台查询、脱敏；失败不能编造状态。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s7-config">
+              <input type="checkbox" />
+              <div>
+                <div class="path">config/handoff-rules.json + config/prompts/* + config/channels.json <span class="tag core">核心</span></div>
+                <div class="meta">转人工规则、各平台 Prompt、渠道开关与知识路由相关配置。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s7-guide">
+              <input type="checkbox" />
+              <div>
+                <div class="path">apps/api/src/routes/guide.ts + packaging/.../getting-started.html <span class="tag core">核心</span></div>
+                <div class="meta">便携包引导页 /guide：状态检测、白名单在线编辑。</div>
+              </div>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <!-- STEP 8 -->
+      <section id="step8">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">9</div>
+            <div>
+              <h3>交付、文档与样例</h3>
+              <p>便携包脚本、流程文档、测试知识库。梳理完主链路后再看。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <p class="goal">目标：知道给客户交付时改哪些文件，以及文档如何保持同步。</p>
+            <label class="file" data-id="s8-portable">
+              <input type="checkbox" />
+              <div>
+                <div class="path">packaging/windows-portable/* <span class="tag core">核心</span></div>
+                <div class="meta">Start / Stop / Doctor 脚本与使用说明。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s8-docs">
+              <input type="checkbox" />
+              <div>
+                <div class="path">docs/project-flow.html + docs/project-files.js <span class="tag must">必读</span></div>
+                <div class="meta">流程总览与文件职责索引。改主链路时必须同步（见 AGENTS.md）。</div>
+              </div>
+            </label>
+            <label class="file" data-id="s8-samples">
+              <input type="checkbox" />
+              <div>
+                <div class="path">samples/kb/* <span class="tag optional">可选</span></div>
+                <div class="meta">门店/套餐/售后测试知识。上传到 kb-admin 做检索回归。</div>
+              </div>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <section id="appendix">
+        <article class="step-card">
+          <div class="step-head">
+            <div class="num">附</div>
+            <div>
+              <h3>目录速查与梳理建议</h3>
+              <p>卡住时用这张表定位；细节文件列表仍以 project-flow「文件职责索引」为准。</p>
+            </div>
+          </div>
+          <div class="step-body">
+            <div class="map">
+              <div class="card">
+                <h4>我想看「消息怎么进来」</h4>
+                <p>extensions/.../content.js → background.js → extension-gateway.ts → routes/rpa.ts → adapters/* → message.service.ts</p>
+              </div>
+              <div class="card">
+                <h4>我想看「回复怎么生成」</h4>
+                <p>reply.worker.ts → order.service / rag.service → openclaw.service → safety.service → reply-drafts</p>
+              </div>
+              <div class="card">
+                <h4>我想看「怎么发出去」</h4>
+                <p>extension-gateway 推 draft → content.js applyDraft → 点击发送 → outbound → mark-sent</p>
+              </div>
+              <div class="card">
+                <h4>我想看「知识库」</h4>
+                <p>kb-admin.html → rag-service routes/api → brain-sync → hybrid-retriever → answer-generator</p>
+              </div>
+              <div class="card">
+                <h4>暂时可少看</h4>
+                <p>Playwright watcher、旧 knowledge.service、rag-application 旧 Chunk 链路、dist/ 生成物</p>
+              </div>
+              <div class="card">
+                <h4>每天建议节奏</h4>
+                <p>1 步规则 + 1 步主链路文件；边读边在终端跑一次「你好」看 [RPA] 日志对照。</p>
+              </div>
+            </div>
+            <footer>
+              打开方式：用浏览器直接打开本文件，或从 README / project-flow 进入。
+              勾选进度键名：<code>customer-ai-code-review-progress-v1</code>。
+              若与代码不一致，以源码和 AGENTS.md 为准，并同步更新本页。
+            </footer>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'customer-ai-code-review-progress-v1';
+    const boxes = [...document.querySelectorAll('.file input[type="checkbox"]')];
+
+    function load() {
+      try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      } catch {
+        return {};
+      }
+    }
+
+    function save(state) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function refresh() {
+      const state = load();
+      let done = 0;
+      for (const input of boxes) {
+        const id = input.closest('.file')?.dataset.id;
+        const checked = Boolean(state[id]);
+        input.checked = checked;
+        input.closest('.file')?.classList.toggle('done', checked);
+        if (checked) done += 1;
+      }
+      const total = boxes.length;
+      document.getElementById('progressText').textContent = '已完成 ' + done + ' / ' + total;
+      document.getElementById('progressBar').style.width = (total ? (done / total) * 100 : 0) + '%';
+    }
+
+    for (const input of boxes) {
+      input.addEventListener('change', () => {
+        const id = input.closest('.file')?.dataset.id;
+        if (!id) return;
+        const state = load();
+        state[id] = input.checked;
+        save(state);
+        refresh();
+      });
+    }
+
+    document.getElementById('resetProgress')?.addEventListener('click', () => {
+      if (confirm('确定清空本地勾选进度？')) {
+        localStorage.removeItem(STORAGE_KEY);
+        refresh();
+      }
+    });
+
+    document.getElementById('markMust')?.addEventListener('click', () => {
+      const firstMust = document.querySelector('.tag.must');
+      firstMust?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+
+    const navLinks = [...document.querySelectorAll('nav a[href^="#"]')];
+    const sections = navLinks
+      .map((a) => document.querySelector(a.getAttribute('href')))
+      .filter(Boolean);
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (!visible) return;
+      navLinks.forEach((a) => a.classList.toggle('active', a.getAttribute('href') === '#' + visible.target.id));
+    }, { rootMargin: '-20% 0px -65% 0px', threshold: [0.2, 0.6] });
+    sections.forEach((s) => observer.observe(s));
+
+    refresh();
+  </script>
+</body>
+</html>

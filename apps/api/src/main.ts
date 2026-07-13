@@ -10,6 +10,7 @@ import formbody from '@fastify/formbody';
 import Fastify from 'fastify';
 import { env } from './config/env.js';
 import { conversationRoutes } from './routes/conversations.js';
+import { guideRoutes } from './routes/guide.js';
 import { healthRoutes } from './routes/health.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { orderRoutes } from './routes/orders.js';
@@ -18,8 +19,40 @@ import { rpaRoutes } from './routes/rpa.js';
 import { wecomWebhookRoutes } from './routes/webhooks.wecom.js';
 import { startReplyWorker } from './workers/reply.worker.js';
 import { registerRpaExtensionGateway } from './rpa/extension-gateway.js';
+
+/** 扩展轮询会高频打这些接口；默认访问日志会把终端刷满。业务事件改走 terminalLog。 */
+const QUIET_REQUEST_PATHS = [
+    '/reply-drafts/recent',
+    '/rpa/extension/status',
+    '/rpa/inbound',
+    '/rpa/outbound',
+    '/health'
+];
+
+function isQuietRequestPath(url = '') {
+    const path = String(url).split('?')[0];
+    return QUIET_REQUEST_PATHS.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
+
 const app = Fastify({
-    logger: true
+    logger: true,
+    // 关闭 Fastify 默认的每条 request 访问日志，改由下方 hook 按路径过滤输出。
+    disableRequestLogging: true
+});
+app.addHook('onResponse', (request, reply, done) => {
+    // 轮询类接口只在失败时打日志；其他接口保留精简完成日志。
+    if (isQuietRequestPath(request.url) && reply.statusCode < 400) {
+        done();
+        return;
+    }
+    request.log.info({
+        reqId: request.id,
+        method: request.method,
+        url: request.url,
+        statusCode: reply.statusCode,
+        responseTime: reply.elapsedTime
+    }, 'request completed');
+    done();
 });
 app.addContentTypeParser(['text/xml', 'application/xml', 'text/plain'], { parseAs: 'string' }, (_request, body, done) => {
     // 企业微信回调是 XML 文本，必须按 UTF-8 字符串接收后再验签/解密。
@@ -28,6 +61,7 @@ app.addContentTypeParser(['text/xml', 'application/xml', 'text/plain'], { parseA
 await app.register(cors, { origin: true });
 await app.register(formbody);
 await app.register(healthRoutes);
+await app.register(guideRoutes);
 await app.register(rpaRoutes);
 await app.register(wecomWebhookRoutes);
 await app.register(knowledgeRoutes);

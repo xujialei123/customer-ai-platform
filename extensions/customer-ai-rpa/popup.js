@@ -2,29 +2,56 @@
  * @file extensions/customer-ai-rpa/popup.js
  * @module RPA 与 Chrome 插件
  * @description 扩展配置持久化、连接状态和 AI 选择器识别。
- * @see 联动关注：Chrome storage API。
+ * @see 联动关注：Chrome storage API、platform-profiles.js。
  */
 const fields = ['shopId', 'messageItemSelector', 'messageTextSelector', 'replyInputSelector', 'sendButtonSelector', 'enabled', 'autoSwitchConversations', 'autoSend'];
+let activePlatform = 'meituan';
+
+function platformLabel(platform) {
+  return platform === 'douyin' ? '抖音来客' : '美团经营宝';
+}
+
+async function resolveActivePlatform(tab) {
+  if (!tab?.url)
+    return 'meituan';
+  return globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(tab.url) || 'meituan';
+}
+
+async function loadProfileValues(platform, values) {
+  const profile = values.platformProfiles?.[platform] || {};
+  const merged = globalThis.__customerAiPlatformProfiles?.mergePlatformSettings(values, platform, values.activeTabUrl)
+    || { ...profile, enabled: values.enabled, autoSend: values.autoSend, autoSwitchConversations: values.autoSwitchConversations };
+  for (const field of fields) {
+    const element = document.getElementById(field);
+    if (!element)
+      continue;
+    if (element.type === 'checkbox')
+      element.checked = Boolean(merged[field]);
+    else
+      element.value = merged[field] ?? '';
+  }
+}
 
 async function load() {
-  // 打开弹窗时先唤醒后台连接，再用当前会话覆盖安装时的 default-shop 展示值。
-  // 打开面板时立即唤醒后台连接；服务刚恢复时无需等待下一次 30 秒 alarm。
   await chrome.runtime.sendMessage({ type: 'ensureConnection' }).catch(() => undefined);
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  activePlatform = await resolveActivePlatform(tab);
   const values = await chrome.storage.local.get();
+  values.activeTabUrl = tab?.url || '';
   const runtimeStatus = await chrome.runtime.sendMessage({ type: 'getStatus' }).catch(() => null);
   const apiStatus = await fetch('http://127.0.0.1:3001/rpa/extension/status')
     .then((response) => response.json())
     .catch(() => null);
-  const currentSession = runtimeStatus?.sessions?.at(-1) || apiStatus?.sessions?.at(-1);
+  const currentSession = runtimeStatus?.sessions?.find((item) => item.platform === activePlatform)
+    || runtimeStatus?.sessions?.at(-1)
+    || apiStatus?.sessions?.find((item) => item.platform === activePlatform)
+    || apiStatus?.sessions?.at(-1);
   if (currentSession?.shopId && currentSession.shopId !== 'default-shop')
     values.shopId = currentSession.shopId;
-  for (const field of fields) {
-    const element = document.getElementById(field);
-    if (element.type === 'checkbox')
-      element.checked = Boolean(values[field]);
-    else
-      element.value = values[field] ?? '';
-  }
+  await loadProfileValues(activePlatform, values);
+  const platformHint = document.getElementById('platformHint');
+  if (platformHint)
+    platformHint.textContent = `当前页面：${platformLabel(activePlatform)}（美团与抖音可同时开标签页，配置按页面分别保存）`;
   const status = document.getElementById('status');
   const serverAutoSend = apiStatus?.rpaAutoSendEnabled === true;
   const base = values.connectionState === 'connected'
@@ -38,11 +65,10 @@ async function load() {
     const resultNode = document.getElementById('ai-result');
     resultNode.style.display = 'block';
     resultNode.className = 'error';
-    resultNode.textContent = '弹窗已开自动发送，但服务端 RPA_AUTO_SEND_ENABLED=false。请确认 .env 后重启 pnpm dev。';
+    resultNode.textContent = '弹窗已开自动发送，但服务端 RPA_AUTO_SEND_ENABLED=false。请确认 .env 后重启服务。';
   }
-  // 旧占位选择器会导致“能读消息但点不了发送”，打开弹窗时直接纠正并提示。
   const sendInput = document.getElementById('sendButtonSelector');
-  if (sendInput?.value && String(sendInput.value).includes('not-configured')) {
+  if (activePlatform === 'meituan' && sendInput?.value && String(sendInput.value).includes('not-configured')) {
     sendInput.value = '.dzim-chat-input-send > button.dzim-button-primary';
     const resultNode = document.getElementById('ai-result');
     resultNode.style.display = 'block';
@@ -52,18 +78,30 @@ async function load() {
 }
 
 document.getElementById('save').addEventListener('click', async () => {
-  const values = {};
+  const values = await chrome.storage.local.get();
+  const profile = {};
   for (const field of fields) {
     const element = document.getElementById(field);
-    values[field] = element.type === 'checkbox' ? element.checked : element.value.trim();
+    if (field === 'enabled' || field === 'autoSwitchConversations' || field === 'autoSend')
+      values[field] = element.type === 'checkbox' ? element.checked : element.value.trim();
+    else
+      profile[field] = element.value.trim();
   }
+  values.platformProfiles = values.platformProfiles || {};
+  values.platformProfiles[activePlatform] = {
+    ...globalThis.__customerAiPlatformProfiles?.PLATFORM_PROFILES?.[activePlatform],
+    ...values.platformProfiles[activePlatform],
+    ...profile,
+    platform: activePlatform
+  };
+  if (activePlatform === 'meituan')
+    Object.assign(values, profile);
   await chrome.storage.local.set(values);
   chrome.runtime.sendMessage({ type: 'settingsChanged' });
   window.close();
 });
 
 document.getElementById('autoSend').addEventListener('change', async (event) => {
-  // 自动发送属于高风险开关，变更后立即持久化并重新同步服务端，不能依赖用户再点击“保存配置”。
   await chrome.storage.local.set({ autoSend: event.target.checked });
   chrome.runtime.sendMessage({ type: 'settingsChanged' });
   const resultNode = document.getElementById('ai-result');
@@ -75,7 +113,6 @@ document.getElementById('autoSend').addEventListener('change', async (event) => 
 });
 
 document.getElementById('autoSwitchConversations').addEventListener('change', async (event) => {
-  // 多会话调度也需要显式授权并持久化，扩展重启后继续沿用操作员的选择。
   await chrome.storage.local.set({ autoSwitchConversations: event.target.checked });
   chrome.runtime.sendMessage({ type: 'settingsChanged' });
 });
@@ -97,7 +134,7 @@ document.getElementById('auto-config').addEventListener('click', async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id)
-      throw new Error('未找到当前经营宝标签页');
+      throw new Error('未找到当前客服标签页');
     const collected = await chrome.tabs.sendMessage(tab.id, { type: 'collectDomSnapshot' });
     const response = await fetch('http://127.0.0.1:3001/rpa/extension/analyze-dom', {
       method: 'POST',
@@ -110,7 +147,14 @@ document.getElementById('auto-config').addEventListener('click', async () => {
     const validation = await chrome.tabs.sendMessage(tab.id, { type: 'validateAiSelectors', selectors: analyzed.selectors });
     if (!validation?.valid)
       throw new Error(`候选选择器未通过本页验证：${JSON.stringify(validation?.counts || validation?.error)}`);
-    await chrome.storage.local.set({ ...analyzed.selectors, settingsVersion: 2 });
+    const stored = await chrome.storage.local.get();
+    stored.platformProfiles = stored.platformProfiles || {};
+    stored.platformProfiles[activePlatform] = {
+      ...stored.platformProfiles[activePlatform],
+      ...analyzed.selectors,
+      platform: activePlatform
+    };
+    await chrome.storage.local.set({ ...stored, settingsVersion: 8 });
     for (const field of fields) {
       if (analyzed.selectors[field] && document.getElementById(field))
         document.getElementById(field).value = analyzed.selectors[field];

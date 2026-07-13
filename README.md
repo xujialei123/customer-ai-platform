@@ -12,7 +12,7 @@
 
 ## 架构说明
 
-首次接手、整体梳理或准备项目汇报时，请先阅读：[项目梳理指南](docs/project-walkthrough.md)。文档按启动、API、数据库、消息、订单、RAG、OpenClaw、RPA、企微和部署顺序标注了当前状态、风险与 TODO。
+首次接手、整体梳理或准备项目汇报时，请先打开：[代码整体梳理指南（HTML）](docs/code-review-guide.html)（可勾选进度）。文字版见：[项目梳理指南](docs/project-walkthrough.md)。文档按启动、API、数据库、消息、订单、RAG、OpenClaw、RPA、企微和部署顺序标注了当前状态、风险与 TODO。
 
 标准链路：
 
