@@ -146,16 +146,11 @@ async function readDrafts(client, apiBaseUrl) {
             const previousPush = client.draftPushState.get(draft.id);
             if (previousPush?.skipped)
                 continue;
-            // 仅当客户端明确回报点击失败时才重推；点击成功后进入 dispatching，由 outbound 回显最终确认 sent。
+            // 仅当客户端明确回报点击失败时才重推；禁止「20 秒无回执」把同一条旧回复再发一遍。
             if (previousPush?.clicked === true)
                 continue;
-            if (previousPush?.allowAutoSend && previousPush?.clickFailed !== true) {
-                const pushedAt = previousPush.pushedAt ?? 0;
-                const age = Date.now() - pushedAt;
-                // 已推送但客户端尚未回报：先等待；超时后允许重推（可能 session 路由到了「抖音来客」等占位 ID）。
-                if (previousPush.clicked == null && age < 20000)
-                    continue;
-            }
+            if (previousPush?.allowAutoSend === true && previousPush?.clickFailed !== true)
+                continue;
             if (previousPush?.allowAutoSend && previousPush?.clickFailed === true) {
                 const pushedAt = previousPush.pushedAt ?? 0;
                 if (Date.now() - pushedAt < 8000)
@@ -163,34 +158,45 @@ async function readDrafts(client, apiBaseUrl) {
             }
             const isExpectedMessage = client.expectedMessageIds.has(draft.messageId);
             const cooldownPassed = Date.now() - client.lastAutoSendAt >= 8000;
-            // 两个平台都必须通过同一套服务端白名单判断；空白名单才表示全量开放。
-            // expectedMessageId 只能证明消息刚入库，不能绕过客户灰度范围。
             const allowPlatformRpaAutoSend = isRpaCustomerAllowed(session);
+            // 冷却未到时不要烧掉 expectedMessageId，也不要 fill_only 占位，等下一轮再自动发送最新一条。
+            if (client.autoSendEnabled
+                && env.RPA_AUTO_SEND_ENABLED
+                && isExpectedMessage
+                && draft.riskLevel === 'low'
+                && draft.alreadyReplied !== true
+                && allowPlatformRpaAutoSend
+                && !cooldownPassed) {
+                continue;
+            }
             const allowAutoSend = Boolean(client.autoSendEnabled)
                 && env.RPA_AUTO_SEND_ENABLED
                 && draft.riskLevel === 'low'
+                && draft.alreadyReplied !== true
                 && cooldownPassed
                 && isExpectedMessage
                 && allowPlatformRpaAutoSend;
-            if (previousPush && !allowAutoSend && !previousPush.allowAutoSend)
-                continue;
-            client.draftPushState.set(draft.id, { allowAutoSend, pushedAt: Date.now(), clicked: null, clickFailed: false });
-            client.expectedMessageIds.delete(draft.messageId);
-            if (allowAutoSend)
-                client.lastAutoSendAt = Date.now();
             const denyReason = allowAutoSend
                 ? ''
-                : !client.autoSendEnabled
-                    ? 'extension_auto_send_off'
-                    : !env.RPA_AUTO_SEND_ENABLED
-                        ? 'server_rpa_auto_send_off'
-                        : draft.riskLevel !== 'low'
-                            ? `risk_${draft.riskLevel}`
-                            : !cooldownPassed
-                                ? 'cooldown'
+                : draft.alreadyReplied === true
+                    ? 'already_replied'
+                    : !client.autoSendEnabled
+                        ? 'extension_auto_send_off'
+                        : !env.RPA_AUTO_SEND_ENABLED
+                            ? 'server_rpa_auto_send_off'
+                            : draft.riskLevel !== 'low'
+                                ? `risk_${draft.riskLevel}`
                                 : (!isExpectedMessage || !allowPlatformRpaAutoSend)
                                     ? 'session_not_authorized'
                                     : 'unknown';
+            // 已经 fill_only 过且本次仍不能自动发送：不要反复刷输入框。
+            if (previousPush && !previousPush.allowAutoSend && !allowAutoSend)
+                continue;
+            client.draftPushState.set(draft.id, { allowAutoSend, pushedAt: Date.now(), clicked: null, clickFailed: false });
+            if (allowAutoSend || draft.alreadyReplied === true || !isExpectedMessage)
+                client.expectedMessageIds.delete(draft.messageId);
+            if (allowAutoSend)
+                client.lastAutoSendAt = Date.now();
             sendFrame(client.socket, {
                 type: 'draft',
                 session,
@@ -327,8 +333,17 @@ async function handleMessage(client, apiBaseUrl, raw) {
         });
         return;
     }
-    if (message.type === 'inbound' && message.payload?.id)
+    if (message.type === 'inbound' && message.payload?.id) {
+        // 同一会话只保留最新入站期望草稿，避免抖音历史 pending 排队连发。
+        const conversationId = String(message.payload.conversationId || '');
+        if (conversationId) {
+            for (const existingId of [...client.expectedMessageIds]) {
+                if (String(existingId).startsWith(`${conversationId}:`))
+                    client.expectedMessageIds.delete(existingId);
+            }
+        }
         client.expectedMessageIds.add(message.payload.id);
+    }
     const endpoint = message.type === 'outbound' ? '/rpa/outbound' : '/rpa/inbound';
     const response = await fetch(new URL(endpoint, apiBaseUrl), {
         method: 'POST',

@@ -321,6 +321,9 @@
       <aside class="card">
         <div class="card-head"><h2>快捷入口</h2></div>
         <div class="card-body links">
+          <a class="link-btn" href="http://127.0.0.1:3001/handoff" target="_blank" rel="noreferrer">
+            <span>转人工工作台</span><small id="handoffLinkHint">待处理高/中风险草稿</small>
+          </a>
           <a class="link-btn" href="http://127.0.0.1:8787/kb-admin" target="_blank" rel="noreferrer">
             <span>知识库管理</span><small>上传门店资料</small>
           </a>
@@ -406,6 +409,11 @@
         setDot('dotOpenClaw', data.openclaw?.ok ? 'ok' : (data.openclaw?.configured ? 'warn' : 'bad'));
         setDot('dotExt', data.extension?.connectedClients > 0 ? 'ok' : 'warn');
         setDot('dotAutoSend', data.extension?.rpaAutoSendEnabled ? 'ok' : 'warn');
+        const handoffHint = document.getElementById('handoffLinkHint');
+        if (handoffHint) {
+          const open = Number(data.handoff?.open ?? 0);
+          handoffHint.textContent = open > 0 ? ('待处理 ' + open + ' 条') : '暂无待处理';
+        }
 
         const rows = [
           ['AUTO_REPLY_ENABLED', data.config?.autoReplyEnabled ? tag('已开启', 'ok') : tag('未开启', 'warn')],

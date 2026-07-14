@@ -8,7 +8,9 @@ param(
   [string]$OutputPath = '',
   [string]$OpenClawSource = 'F:\OpenClaw-USB-Portable',
   [string]$PnpmCommand = '',
-  [switch]$CreateZip
+  [switch]$CreateZip,
+  # 交付给外部客户时打开：强制关闭自动发送，忽略开发机 .env 里的开关。
+  [switch]$SafeSendDefaults
 )
 
 $ErrorActionPreference = 'Stop'
@@ -85,6 +87,29 @@ function Set-EnvValue([string]$Text, [string]$Name, [string]$Value) {
     return [regex]::Replace($Text, "(?m)^$([regex]::Escape($Name))=.*$", $line)
   }
   return "$Text`r`n$line"
+}
+
+function Get-RootEnvValue([string]$Name) {
+  $path = Join-Path $Root '.env'
+  if (-not (Test-Path -LiteralPath $path)) { return $null }
+  $text = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
+  $pattern = "(?m)^\s*$([regex]::Escape($Name))\s*=\s*(.*)$"
+  $match = [regex]::Match($text, $pattern)
+  if (-not $match.Success) { return $null }
+  $raw = $match.Groups[1].Value.Trim()
+  if (($raw.StartsWith('"') -and $raw.EndsWith('"')) -or ($raw.StartsWith("'") -and $raw.EndsWith("'"))) {
+    return $raw.Substring(1, $raw.Length - 2)
+  }
+  return $raw
+}
+
+function Resolve-PackagedEnvValue([string]$Name, [string]$Default, [switch]$SafeSendDefaults) {
+  if ($SafeSendDefaults -and ($Name -eq 'AUTO_REPLY_ENABLED' -or $Name -eq 'RPA_AUTO_SEND_ENABLED')) {
+    return 'false'
+  }
+  $fromDev = Get-RootEnvValue $Name
+  if ($null -ne $fromDev -and $fromDev -ne '') { return $fromDev }
+  return $Default
 }
 
 Write-Host '1/6 Building project...' -ForegroundColor Cyan
@@ -168,13 +193,33 @@ $values = [ordered]@{
   OPENCLAW_TIMEOUT_MS = '30000'
   ORDER_ADAPTER_MODE = 'mock'
   RPA_MOCK_MODE = 'extension'
-  AUTO_REPLY_ENABLED = 'false'
-  RPA_AUTO_SEND_ENABLED = 'false'
+  AUTO_REPLY_ENABLED = (Resolve-PackagedEnvValue 'AUTO_REPLY_ENABLED' 'false' -SafeSendDefaults:$SafeSendDefaults)
+  RPA_AUTO_SEND_ENABLED = (Resolve-PackagedEnvValue 'RPA_AUTO_SEND_ENABLED' 'false' -SafeSendDefaults:$SafeSendDefaults)
   MEITUAN_RPA_ENABLED = 'true'
   MEITUAN_RPA_USER_DATA_DIR = '.\data\sessions\meituan-production'
+  MEITUAN_RPA_ALLOWED_CUSTOMERS = (Resolve-PackagedEnvValue 'MEITUAN_RPA_ALLOWED_CUSTOMERS' '')
+  DOUYIN_RPA_ALLOWED_CUSTOMERS = (Resolve-PackagedEnvValue 'DOUYIN_RPA_ALLOWED_CUSTOMERS' '')
 }
-foreach ($entry in $values.GetEnumerator()) { $envText = Set-EnvValue $envText $entry.Key $entry.Value }
+foreach ($optionalKey in @(
+  'EMBEDDING_BASE_URL', 'EMBEDDING_API_KEY', 'EMBEDDING_MODEL', 'EMBEDDING_DIM',
+  'LLM_API_KEY', 'LLM_MODEL', 'RAG_API_KEY'
+)) {
+  $fromDev = Get-RootEnvValue $optionalKey
+  if ($null -ne $fromDev -and $fromDev -ne '') { $values[$optionalKey] = $fromDev }
+}
+foreach ($entry in $values.GetEnumerator()) {
+  $envText = Set-EnvValue $envText $entry.Key ([string]$entry.Value)
+  if (Get-RootEnvValue $entry.Key) {
+    Write-Host ("  Preserved {0} from project .env" -f $entry.Key) -ForegroundColor DarkGray
+  }
+}
 [IO.File]::WriteAllText((Join-Path $PackageRoot '.env'), $envText, $utf8NoBom)
+
+$allowlistLocal = Join-Path $Root 'config\rpa-allowlist.local.json'
+if (Test-Path -LiteralPath $allowlistLocal) {
+  Copy-Item -LiteralPath $allowlistLocal -Destination (Join-Path $PackageRoot 'config\rpa-allowlist.local.json') -Force
+  Write-Host '  Preserved config\rpa-allowlist.local.json from project.' -ForegroundColor DarkGray
+}
 
 $buildInfo = @(
   'Customer AI Windows Portable',

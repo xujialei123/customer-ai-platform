@@ -20,8 +20,16 @@ foreach ($check in $checks) {
   Write-Host ("{0,-14} {1}" -f $check.Name, $(if ($ok) { 'OK' } else { 'MISSING' })) -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' })
 }
 
-& docker info *> $null
-if ($LASTEXITCODE -eq 0) { Write-Host 'Docker         OK' -ForegroundColor Green } else { Write-Host 'Docker         NOT READY' -ForegroundColor Red }
+& docker info 2>$null | Out-Null
+if ($LASTEXITCODE -eq 0) {
+  Write-Host 'Docker         OK' -ForegroundColor Green
+  foreach ($name in @('customer-ai-postgres', 'customer-ai-redis')) {
+    $state = & docker inspect -f '{{.State.Running}}' $name 2>$null
+    if ($state -eq 'true') { Write-Host ("{0,-14} running" -f $name) -ForegroundColor Green }
+    elseif ($state) { Write-Host ("{0,-14} stopped" -f $name) -ForegroundColor Yellow }
+    else { Write-Host ("{0,-14} missing" -f $name) -ForegroundColor Yellow }
+  }
+} else { Write-Host 'Docker         NOT READY' -ForegroundColor Red }
 foreach ($service in @(
   @{ Name = 'OpenClaw'; Url = 'http://127.0.0.1:18789/' },
   @{ Name = 'RAG'; Url = 'http://127.0.0.1:8787/health' },

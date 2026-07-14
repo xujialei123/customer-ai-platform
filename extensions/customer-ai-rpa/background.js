@@ -7,7 +7,7 @@
 importScripts('platform-profiles.js');
 
 const GLOBAL_SETTINGS = {
-  settingsVersion: 14,
+  settingsVersion: 15,
   enabled: true,
   wsUrl: 'ws://127.0.0.1:3001/rpa/extension/ws',
   autoSwitchConversations: false,
@@ -140,6 +140,8 @@ async function migrateSettings(saved) {
     customerNameSelector: PLATFORM_PROFILES.douyin.customerNameSelector,
     messageItemSelector: PLATFORM_PROFILES.douyin.messageItemSelector,
     messageTextSelector: PLATFORM_PROFILES.douyin.messageTextSelector,
+    outboundMessageItemSelector: PLATFORM_PROFILES.douyin.outboundMessageItemSelector,
+    outboundMessageTextSelector: PLATFORM_PROFILES.douyin.outboundMessageTextSelector,
     replyInputSelector: PLATFORM_PROFILES.douyin.replyInputSelector,
     sendButtonSelector: PLATFORM_PROFILES.douyin.sendButtonSelector,
     conversationItemSelector: PLATFORM_PROFILES.douyin.conversationItemSelector,

@@ -20,6 +20,7 @@
 - 停止：Stop-Customer-AI.bat
 - 检查：Doctor-Customer-AI.bat
 - 配置引导：http://127.0.0.1:3001/guide
+- 转人工工作台：http://127.0.0.1:3001/handoff
 - 打包后测试清单：portable-test-checklist.html（浏览器打开，可勾选进度）
 - 插件状态：http://127.0.0.1:3001/rpa/extension/status
 - 项目流程：docs\project-flow.html

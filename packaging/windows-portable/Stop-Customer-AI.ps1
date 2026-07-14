@@ -24,7 +24,9 @@ foreach ($name in @('meituan-rpa', 'api', 'rag-service')) {
   }
 }
 
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'openclaw\Stop-OpenClaw.ps1')
-Push-Location $Root
-try { docker compose stop | Out-Null } finally { Pop-Location }
-Write-Host 'Customer AI stopped. Database volumes and login profiles were preserved.' -ForegroundColor Green
+$stopOpenClaw = Join-Path $Root 'openclaw\Stop-OpenClaw.ps1'
+if (Test-Path -LiteralPath $stopOpenClaw) {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $stopOpenClaw
+}
+# 不执行 docker compose stop：Postgres/Redis 容器名固定，可能与开发环境共用；停止会误伤共享数据库。
+Write-Host 'Customer AI app processes stopped. Docker Postgres/Redis were left running.' -ForegroundColor Green

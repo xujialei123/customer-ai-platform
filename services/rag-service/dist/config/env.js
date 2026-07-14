@@ -66,19 +66,29 @@ const envSchema = z.object({
     RPA_MAX_REPLY_CHARS: z.coerce.number().default(500)
 });
 const parsedEnv = envSchema.parse(process.env);
-function resolveOpenClawToken() {
-    if (!parsedEnv.OPENCLAW_TOKEN_FILE)
-        return parsedEnv.OPENCLAW_TOKEN;
-    const tokenPath = isAbsolute(parsedEnv.OPENCLAW_TOKEN_FILE)
-        ? parsedEnv.OPENCLAW_TOKEN_FILE
-        : resolve(runtimeRoot, parsedEnv.OPENCLAW_TOKEN_FILE);
-    if (!existsSync(tokenPath))
-        return parsedEnv.OPENCLAW_TOKEN;
-    return readFileSync(tokenPath, 'utf-8').trim();
+/**
+ * 与 API 一致：未配置时优先读取包根目录 openclaw/data/.openclaw/gateway-token.txt。
+ * 开发机可继续用 OPENCLAW_TOKEN_FILE / OPENCLAW_TOKEN 覆盖。
+ */
+function resolveOpenClawTokenFile() {
+    const configured = String(parsedEnv.OPENCLAW_TOKEN_FILE ?? '').trim();
+    if (configured)
+        return isAbsolute(configured) ? configured : resolve(runtimeRoot, configured);
+    const bundled = resolve(runtimeRoot, 'openclaw', 'data', '.openclaw', 'gateway-token.txt');
+    if (existsSync(bundled) || existsSync(resolve(runtimeRoot, 'openclaw', 'Start-OpenClaw.ps1')))
+        return bundled;
+    return '';
 }
+function resolveOpenClawToken(tokenFile) {
+    if (tokenFile && existsSync(tokenFile))
+        return readFileSync(tokenFile, 'utf-8').trim();
+    return parsedEnv.OPENCLAW_TOKEN;
+}
+const openClawTokenFile = resolveOpenClawTokenFile();
 export const env = {
     ...parsedEnv,
-    OPENCLAW_TOKEN: resolveOpenClawToken()
+    OPENCLAW_TOKEN_FILE: openClawTokenFile,
+    OPENCLAW_TOKEN: resolveOpenClawToken(openClawTokenFile)
 };
 export function safeEnvView() {
     return {

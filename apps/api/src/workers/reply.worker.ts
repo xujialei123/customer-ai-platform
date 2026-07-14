@@ -180,6 +180,12 @@ export function startReplyWorker() {
                         ragContext: ragContext
                     }
                 });
+                if (finalRisk.riskLevel === 'high' || finalRisk.riskLevel === 'medium') {
+                    await prisma.conversation.update({
+                        where: { id: conversation.id },
+                        data: { status: 'needs_human' }
+                    });
+                }
                 terminalLog('draft', {
                     platform: conversation.platform,
                     customer: conversation.customerName || conversation.customerId,
@@ -209,6 +215,13 @@ export function startReplyWorker() {
                     ragContext: ragContext
                 }
             });
+            // 高/中风险进入转人工工作台；会话打上 needs_human，方便后续筛选。
+            if (finalRisk.riskLevel === 'high' || finalRisk.riskLevel === 'medium') {
+                await prisma.conversation.update({
+                    where: { id: conversation.id },
+                    data: { status: 'needs_human' }
+                });
+            }
             terminalLog('draft', {
                 platform: conversation.platform,
                 customer: conversation.customerName || conversation.customerId,

@@ -50,7 +50,7 @@ export async function guideRoutes(app) {
     app.get('/guide/status', async () => {
         await refreshRpaAllowlistCache().catch(() => undefined);
         const allowlist = buildRpaAllowlistStatus();
-        const [openclaw, rag, extension] = await Promise.all([
+        const [openclaw, rag, extension, handoff] = await Promise.all([
             fetch(env.OPENCLAW_GATEWAY_URL, { signal: AbortSignal.timeout(2000) })
                 .then((response) => ({
                     ok: response.status >= 200 && response.status < 500,
@@ -67,7 +67,8 @@ export async function guideRoutes(app) {
                 connectedClients: 0,
                 autoSendClients: 0,
                 rpaAutoSendEnabled: env.RPA_AUTO_SEND_ENABLED
-            }))
+            })),
+            fetchJson(`http://127.0.0.1:${env.API_PORT}/handoff/count`).catch(() => ({ open: 0 }))
         ]);
         return {
             ok: true,
@@ -75,6 +76,7 @@ export async function guideRoutes(app) {
             openclaw,
             rag,
             extension,
+            handoff: { open: Number(handoff?.open ?? 0) },
             config: {
                 autoReplyEnabled: env.AUTO_REPLY_ENABLED,
                 rpaAutoSendEnabled: env.RPA_AUTO_SEND_ENABLED,

@@ -10,6 +10,8 @@ const seenMessages = new Set();
 const submittedInboundIds = new Set();
 /** 已提交过的「会话+方向+正文」指纹，防止 ID 抖动时未读角标把旧消息再提一次。 */
 const submittedInboundContents = new Set();
+/** 抖音同一会话最近一次入站正文，用于吞掉流式残文（「你」→「你好」）和虚拟列表回放。 */
+const lastDouyinInboundByConversation = new Map();
 const initializedConversations = new Set();
 let observer;
 let scanTimer;
@@ -102,6 +104,13 @@ function textOf(element, selector) {
   return (selector ? element.querySelector(selector)?.textContent : element.textContent)?.trim() ?? '';
 }
 
+function textOfDouyinBubble(element) {
+  // 不要取气泡内第一个嵌套 div：流式渲染时子节点经常只是残字，会导致「你」「那」各自入队再狂回。
+  const bubble = element?.closest?.('.chatd-bubble--other, .chatd-bubble-main, .chatd-message') || element;
+  const main = bubble?.querySelector?.('.chatd-bubble-main') || bubble;
+  return String(main?.innerText || main?.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
 function createStableId(conversationId, direction, content, index, platform, element, occurrence = 1) {
   // 平台缺少 messageId 时才使用兜底 ID；数据库仍会做第二层去重。
   if (platform === 'douyin') {
@@ -113,6 +122,25 @@ function createStableId(conversationId, direction, content, index, platform, ele
     return `${conversationId}:${direction}:${occurrence}:${content.slice(0, 120)}`;
   }
   return `${conversationId}:${direction}:${index}:${content}`;
+}
+
+/**
+ * 抖音流式/回扫：上一句的残缺回放应跳过；上一句加长成完整句时允许提交（服务端会软去重短句）。
+ * @returns {'skip'|'continue'}
+ */
+function classifyDouyinInboundEvolution(conversationId, content) {
+  const previous = lastDouyinInboundByConversation.get(conversationId) || '';
+  if (!previous || !content)
+    return 'continue';
+  if (previous === content)
+    return 'skip';
+  // 残字回放（完整句之后又扫到前缀）
+  if (previous.startsWith(content) && content.length < previous.length)
+    return 'skip';
+  // 流式加长：允许用更长正文替换入队
+  if (content.startsWith(previous) && content.length > previous.length)
+    return 'continue';
+  return 'continue';
 }
 
 function normalizeUnreadCount(raw) {
@@ -149,13 +177,13 @@ function getDouyinSelectedListCustomerName(targetDocument) {
 function readDouyinSession(targetDocument, settings, targetUrl) {
   const url = new URL(targetUrl);
   const accountId = url.searchParams.get('accountId') || '';
-  const groupId = url.searchParams.get('groupId') || url.searchParams.get('conGroupId') || '';
+  // conGroupId 才是「单个顾客会话」；groupId/accountId 经常是账号级，当 conversationId 会导致串会话与 ID 抖动。
+  const conGroupId = url.searchParams.get('conGroupId') || '';
   const lifeAccountId = url.searchParams.get('lifeAccountId') || '';
   const customerName = resolveDouyinCustomerName(targetDocument, settings);
-  const urlConversationId = groupId || accountId || '';
-  // 顶部昵称优先；绝不能用 document.title（常为「抖音来客」）作为会话键，否则草稿永远路由不到客户。
-  const conversationId = customerName || urlConversationId;
-  const customerId = urlConversationId || customerName || '';
+  // 稳定会话键：有 conGroupId 时固定用它，避免昵称短暂读空时在「徐伟」↔「账号数字」之间来回跳。
+  const conversationId = conGroupId || customerName || accountId || '';
+  const customerId = conGroupId || accountId || customerName || '';
   return {
     platform: 'douyin',
     shopId: lifeAccountId || settings.shopId || 'default-shop',
@@ -1177,16 +1205,31 @@ async function scanMessages() {
     scheduledUnreadCount = Math.min(Math.max(0, scheduledUnreadCount), 9);
     let inboundSent = 0;
     const processItems = (items, direction, textSelector) => {
+      // 抖音：自动扫描阶段只关心最后 N 条（未读数），绝不把历史气泡当新消息连发。
+      // 初次扫描仍会整页写入 seenMessages，只是不入队。
+      let workItems = items;
+      if (settings.platform === 'douyin' && direction === 'inbound' && !isInitialConversationScan) {
+        const take = Math.max(1, scheduledUnreadCount || 1);
+        workItems = items.slice(-take);
+      }
       const contentOccurrence = new Map();
-      items.forEach((item, index) => {
-        const content = textOf(item, textSelector);
+      workItems.forEach((item, index) => {
+        const content = settings.platform === 'douyin'
+          ? textOfDouyinBubble(item)
+          : textOf(item, textSelector);
         if (!content)
+          return;
+        if (settings.platform === 'douyin' && (
+          content === '[暂不支持查看该类消息]'
+          || content.length <= 1
+        ))
           return;
         const occurrence = (contentOccurrence.get(content) || 0) + 1;
         contentOccurrence.set(content, occurrence);
+        // occurrence 对整页 items 计数；切片后 index 不代表全局位置，改用以 0 起的 work index。
         const id = createStableId(conversationId, direction, content, index, settings.platform, item, occurrence);
         const contentKey = `${conversationId}:${direction}:${content}`;
-        const isTriggerUnread = direction === 'inbound' && scheduledUnreadCount > 0 && index === items.length - 1;
+        const isTriggerUnread = direction === 'inbound' && scheduledUnreadCount > 0 && index === workItems.length - 1;
         // 未读角标常在回复后残留；只有「同正文从未提交过」才允许强制重提，避免旧消息换 ID 后二次回复。
         const forceUnreadResubmit = isTriggerUnread
           && cardUnreadCount > 0
@@ -1194,6 +1237,13 @@ async function scanMessages() {
           && !submittedInboundContents.has(contentKey);
         if (seenMessages.has(id) && !forceUnreadResubmit)
           return;
+        if (direction === 'inbound' && settings.platform === 'douyin'
+          && classifyDouyinInboundEvolution(conversationId, content) === 'skip') {
+          seenMessages.add(id);
+          submittedInboundIds.add(id);
+          submittedInboundContents.add(contentKey);
+          return;
+        }
         if (isInitialConversationScan && !isTriggerUnread) {
           seenMessages.add(id);
           return;
@@ -1203,6 +1253,8 @@ async function scanMessages() {
           inboundSent += 1;
           submittedInboundIds.add(id);
           submittedInboundContents.add(contentKey);
+          if (settings.platform === 'douyin')
+            lastDouyinInboundByConversation.set(conversationId, content);
           conversationTask = conversationTask || {
             expectedConversationId: conversationId,
             expectedCustomerName: session.customerName || conversationId,

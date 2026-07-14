@@ -60,14 +60,26 @@ export class MessageService {
         const normalized = String(content ?? '').trim();
         if (!normalized)
             return null;
-        const recent = await prisma.message.findFirst({
+        const recentMessages = await prisma.message.findMany({
             where: {
                 conversationId,
                 direction: 'inbound',
-                content: normalized,
                 createdAt: { gte: new Date(Date.now() - withinMs) }
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
+            take: 20
+        });
+        // 精确同文，或流式残文/加长句（「你」↔「你好」）都视为同一条入站抖动。
+        const recent = recentMessages.find((item) => {
+            const previous = String(item.content ?? '').trim();
+            if (!previous)
+                return false;
+            if (previous === normalized)
+                return true;
+            if (normalized.length <= 40 && previous.length <= 200
+                && (normalized.startsWith(previous) || previous.startsWith(normalized)))
+                return true;
+            return false;
         });
         if (!recent)
             return null;

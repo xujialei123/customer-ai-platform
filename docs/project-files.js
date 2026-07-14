@@ -46,6 +46,7 @@ const fileGroups = [
     ['apps/api/src/routes/knowledge.ts', '旧知识接口兼容层。', '新知识优先使用 8787。'],
     ['apps/api/src/routes/orders.ts', '订单查询测试接口。', 'OrderService。'],
     ['apps/api/src/routes/reply-drafts.ts', '草稿查询、白名单兜底、批准、拒绝、dispatching 与 sent 状态。', 'Extension Gateway、outbound 确认与人工审核。'],
+    ['apps/api/src/routes/handoff.ts', '转人工工作台 API：高/中风险草稿列表与标记已处理。', 'handoff.html、SafetyService、ReplyDraft。'],
     ['apps/api/src/routes/rpa.ts', 'RPA inbound/outbound、配置和扩展状态。', 'MessageService、插件。'],
     ['apps/api/src/routes/webhooks.wecom.ts', '企微 URL 校验和回调入口。', 'Crypto、Adapter、Client。']
   ]],
@@ -148,8 +149,9 @@ const fileGroups = [
     ['packaging/windows-portable/Start-Customer-AI.bat', '双击启动入口。', 'Start PowerShell。'],
     ['packaging/windows-portable/Start-Customer-AI.ps1', '便携环境检查与一键启动。', 'Docker/OpenClaw/RAG/API/引导页 /guide。'],
     ['packaging/windows-portable/getting-started.html', '便携包启动引导页（配置流程、白名单编辑、快捷入口、状态检测）。', '/guide 路由、Start-Customer-AI.ps1、/rpa/allowlist。'],
+    ['packaging/windows-portable/handoff.html', '最小转人工工作台页面。', '/handoff 路由、ReplyDraft 高/中风险。'],
     ['docs/deployment-guide.html', '源码部署、Windows 便携交付、生产基线、RPA 灰度、验收和回滚手册。', 'README、打包脚本、project-flow.html。'],
-    ['apps/api/src/routes/guide.ts', '提供 /guide 引导页与 /guide/status 聚合状态。', 'getting-started.html、便携启动脚本。'],
+    ['apps/api/src/routes/guide.ts', '提供 /guide 引导页与 /guide/status 聚合状态（含转人工待处理数）。', 'getting-started.html、便携启动脚本。'],
     ['packaging/windows-portable/Stop-Customer-AI.bat', '双击停止入口。', 'Stop PowerShell。'],
     ['packaging/windows-portable/Stop-Customer-AI.ps1', '停止本项目服务。', '不得误杀无关进程。'],
     ['packaging/windows-portable/Doctor-Customer-AI.bat', '双击诊断入口。', 'Doctor PowerShell。'],

@@ -4,6 +4,8 @@
  * @description 终端彩色业务日志，方便在 pnpm dev 输出里一眼看到草稿和发送结果。
  * @see 联动关注：ReplyWorker、extension-gateway、Chrome 插件回执。
  */
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 // Windows Terminal / 新版 PowerShell 支持 ANSI；颜色只用于开发排查，不写入业务数据。
 const ansi = {
@@ -55,6 +57,24 @@ function oneLine(text: unknown, max = 160) {
     if (normalized.length <= max)
         return normalized;
     return `${normalized.slice(0, max - 1)}…`;
+}
+
+function stripAnsi(text: string) {
+    return text.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+function appendPortableLogLine(line: string) {
+    const root = process.env.CUSTOMER_AI_ROOT;
+    if (!root)
+        return;
+    const logPath = resolve(root, 'data/logs/api.out.log');
+    try {
+        mkdirSync(dirname(logPath), { recursive: true });
+        appendFileSync(logPath, `${stripAnsi(line)}\n`, 'utf-8');
+    }
+    catch {
+        // 日志写入失败不能影响主流程。
+    }
 }
 
 /**
@@ -110,14 +130,27 @@ export function terminalLog(event: TerminalLogEvent, details: TerminalLogDetails
     if (details.method)
         parts.push(paint(ansi.dim, `方式=${details.method}`));
     console.log(parts.join(' '));
-    if (details.userMessage)
-        console.log(paint(ansi.dim, `  问> ${oneLine(details.userMessage)}`));
-    if (details.content && event !== 'inbound')
-        console.log(paint(color, `  答> ${oneLine(details.content)}`));
-    if (details.content && event === 'inbound')
-        console.log(paint(color, `  问> ${oneLine(details.content)}`));
+    appendPortableLogLine(parts.join(' '));
+    if (details.userMessage) {
+        const line = `  问> ${oneLine(details.userMessage)}`;
+        console.log(paint(ansi.dim, line));
+        appendPortableLogLine(line);
+    }
+    if (details.content && event !== 'inbound') {
+        const line = `  答> ${oneLine(details.content)}`;
+        console.log(paint(color, line));
+        appendPortableLogLine(line);
+    }
+    if (details.content && event === 'inbound') {
+        const line = `  问> ${oneLine(details.content)}`;
+        console.log(paint(color, line));
+        appendPortableLogLine(line);
+    }
     if (Array.isArray(details.ragPreview) && details.ragPreview.length > 0) {
-        for (const [index, item] of details.ragPreview.entries())
-            console.log(paint(ansi.cyan, `  证${index + 1}> ${oneLine(item, 120)}`));
+        for (const [index, item] of details.ragPreview.entries()) {
+            const line = `  证${index + 1}> ${oneLine(item, 120)}`;
+            console.log(paint(ansi.cyan, line));
+            appendPortableLogLine(line);
+        }
     }
 }

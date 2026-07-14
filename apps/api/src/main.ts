@@ -11,6 +11,7 @@ import Fastify from 'fastify';
 import { env } from './config/env.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { guideRoutes } from './routes/guide.js';
+import { handoffRoutes } from './routes/handoff.js';
 import { healthRoutes } from './routes/health.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { orderRoutes } from './routes/orders.js';
@@ -26,6 +27,9 @@ const QUIET_REQUEST_PATHS = [
     '/rpa/extension/status',
     '/rpa/inbound',
     '/rpa/outbound',
+    '/handoff/list',
+    '/handoff/count',
+    '/guide/status',
     '/health'
 ];
 
@@ -62,6 +66,7 @@ await app.register(cors, { origin: true });
 await app.register(formbody);
 await app.register(healthRoutes);
 await app.register(guideRoutes);
+await app.register(handoffRoutes);
 await app.register(rpaRoutes);
 await app.register(wecomWebhookRoutes);
 await app.register(knowledgeRoutes);

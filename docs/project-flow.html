@@ -151,12 +151,13 @@
           <div class="card"><span class="tag red">强制转人工</span><ul class="risk-list"><li>退款、退券、退钱</li><li>投诉、差评</li><li>赔偿、破损、丢失</li><li>食品安全、吃坏、过敏</li><li>报警、12315、工商</li><li>法律、律师</li><li>威胁、辱骂、情绪激烈</li></ul></div>
           <div class="card"><span class="tag red">禁止承诺</span><ul><li>保证退款或赔偿</li><li>免费赠送或特殊折扣</li><li>私下交易或绕开平台规则</li><li>未经查询承诺订单状态</li><li>资料不足时自行推测</li></ul></div>
         </div>
+        <div class="notice">高/中风险草稿不会自动发送，进入 <a href="http://127.0.0.1:3001/handoff">转人工工作台</a>（复用 ReplyDraft，标记已处理后状态为 handled）。会话会短暂标记为 <code>needs_human</code>。</div>
       </section>
 
       <section id="storage">
         <h2>十、数据存储</h2>
         <table><thead><tr><th>数据</th><th>主要位置</th><th>说明</th></tr></thead><tbody>
-          <tr><td>会话、消息、ReplyDraft</td><td>PostgreSQL 业务表</td><td>保存消息方向、草稿状态、风险和上下文摘要</td></tr>
+          <tr><td>会话、消息、ReplyDraft</td><td>PostgreSQL 业务表</td><td>保存消息方向、草稿状态、风险和上下文摘要；转人工复用 riskLevel/status</td></tr>
           <tr><td>原始文件与 Chunk</td><td><code>rag_knowledge_files/chunks</code></td><td>兼容旧 RAG 和原始文件追溯</td></tr>
           <tr><td>Wiki 与卡片</td><td><code>rag_wiki_pages/cards</code></td><td>结构化客服知识和卡片向量</td></tr>
           <tr><td>Graph 与 Gap</td><td><code>rag_knowledge_graph_edges/gaps</code></td><td>关联知识和未覆盖问题</td></tr>

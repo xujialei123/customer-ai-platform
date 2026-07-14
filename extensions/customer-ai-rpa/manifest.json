@@ -4,7 +4,7 @@
   "_relatedModules": "版本号与 host_permissions。",
   "manifest_version": 3,
   "name": "客服中台 RPA 助手",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "description": "在 Chrome 登录会话中同时桥接美团经营宝与抖音来客消息到本地客服中台。",
   "permissions": [
     "storage",

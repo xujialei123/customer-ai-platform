@@ -1,0 +1,317 @@
+<!--
+  @file packaging/windows-portable/handoff.html
+  @module 数据库、共享包与交付
+  @description 最小转人工工作台：列出高/中风险 ReplyDraft，支持标记已处理。
+  @see 联动关注：apps/api/src/routes/handoff.ts、SafetyService。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>转人工工作台</title>
+  <style>
+    :root {
+      --ink: #101828;
+      --muted: #667085;
+      --line: #e4e7ec;
+      --soft: #f8fafc;
+      --blue: #175cd3;
+      --blue-soft: #eff4ff;
+      --green: #067647;
+      --green-soft: #ecfdf3;
+      --amber: #b54708;
+      --amber-soft: #fffaeb;
+      --red: #b42318;
+      --red-soft: #fef3f2;
+      --shadow: 0 8px 24px rgba(16, 24, 40, 0.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #fff4ed 0%, var(--soft) 180px);
+    }
+    header {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 28px 24px 12px;
+    }
+    header h1 { margin: 0 0 8px; font-size: 28px; }
+    header p { margin: 0; color: var(--muted); line-height: 1.7; }
+    .toolbar {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 12px 24px 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .tab {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 999px;
+      padding: 8px 14px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .tab.active {
+      border-color: #f7b27a;
+      background: var(--amber-soft);
+      color: var(--amber);
+      font-weight: 700;
+    }
+    .badge {
+      margin-left: auto;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .badge strong { color: var(--red); }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 18px 24px 48px;
+    }
+    .empty {
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+      padding: 36px 20px;
+      text-align: center;
+      color: var(--muted);
+      background: #fff;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: var(--shadow);
+      padding: 16px 18px;
+      margin-bottom: 12px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .tag.high { background: var(--red-soft); color: var(--red); }
+    .tag.medium { background: var(--amber-soft); color: var(--amber); }
+    .tag.platform { background: var(--blue-soft); color: var(--blue); }
+    .tag.status { background: #f2f4f7; color: #344054; }
+    .q, .a {
+      margin: 0;
+      line-height: 1.65;
+      font-size: 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .q { margin-bottom: 8px; }
+    .label {
+      display: inline-block;
+      min-width: 3em;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .reason {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--amber-soft);
+      color: #7a2e0e;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .actions {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .actions button {
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--green);
+      color: #fff;
+    }
+    .actions button:disabled {
+      opacity: .55;
+      cursor: default;
+    }
+    .msg {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .msg.ok { color: var(--green); }
+    .msg.bad { color: var(--red); }
+    footer {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 24px 28px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    footer a { color: var(--blue); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>转人工工作台</h1>
+    <p>列出风控判定为高/中风险、且尚未自动发送的草稿。请在美团经营宝或抖音来客中人工回复后，再点「标记已处理」。</p>
+  </header>
+
+  <div class="toolbar">
+    <button type="button" class="tab active" data-view="open">待处理</button>
+    <button type="button" class="tab" data-view="handled">已处理</button>
+    <button type="button" class="tab" data-view="all">全部</button>
+    <span class="badge">待处理 <strong id="openCount">0</strong> 条 · 每 8 秒刷新</span>
+  </div>
+
+  <main id="list">
+    <div class="empty">加载中…</div>
+  </main>
+
+  <footer>
+    <a href="/guide">返回配置引导</a> ·
+    本页复用 <code>ReplyDraft</code>（riskLevel = high/medium），不另建表。
+  </footer>
+
+  <script>
+    let currentView = 'open';
+
+    function esc(text) {
+      return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function formatTime(value) {
+      try {
+        return new Date(value).toLocaleString('zh-CN', { hour12: false });
+      } catch {
+        return String(value ?? '');
+      }
+    }
+
+    function setActiveTab() {
+      document.querySelectorAll('.tab').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.view === currentView);
+      });
+    }
+
+    function renderItems(data) {
+      document.getElementById('openCount').textContent = String(data.openCount ?? 0);
+      const list = document.getElementById('list');
+      const items = data.items || [];
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">' +
+          (currentView === 'open' ? '当前没有待处理的转人工消息。' : '暂无记录。') +
+          '</div>';
+        return;
+      }
+      list.innerHTML = items.map((item) => {
+        const riskClass = item.riskLevel === 'high' ? 'high' : 'medium';
+        const canHandle = item.status !== 'handled' && item.status !== 'sent' && item.status !== 'rejected';
+        return [
+          '<article class="card" data-id="' + esc(item.id) + '">',
+          '<div class="meta">',
+          '<span class="tag ' + riskClass + '">' + esc(item.riskLevel) + '</span>',
+          '<span class="tag platform">' + esc(item.platform || '-') + '</span>',
+          '<span class="tag status">' + esc(item.status) + '</span>',
+          '<span>' + esc(item.customerName || item.customerId || item.conversationId || '-') + '</span>',
+          '<span>' + esc(formatTime(item.createdAt)) + '</span>',
+          '</div>',
+          '<p class="q"><span class="label">问</span>' + esc(item.userMessage) + '</p>',
+          '<p class="a"><span class="label">答</span>' + esc(item.content) + '</p>',
+          item.reason ? '<div class="reason">' + esc(item.reason) + '</div>' : '',
+          '<div class="actions">',
+          canHandle
+            ? '<button type="button" data-action="handled">标记已处理</button>'
+            : '<button type="button" disabled>已处理</button>',
+          '<span class="msg"></span>',
+          '</div>',
+          '</article>'
+        ].join('');
+      }).join('');
+    }
+
+    async function loadList() {
+      try {
+        const res = await fetch('/handoff/list?view=' + encodeURIComponent(currentView) + '&limit=50', { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok || !data.ok)
+          throw new Error(data.error || ('HTTP ' + res.status));
+        renderItems(data);
+      } catch (error) {
+        document.getElementById('list').innerHTML =
+          '<div class="empty">加载失败：' + esc(error instanceof Error ? error.message : String(error)) + '</div>';
+      }
+    }
+
+    document.querySelector('.toolbar').addEventListener('click', (event) => {
+      const tab = event.target.closest('.tab');
+      if (!tab) return;
+      currentView = tab.dataset.view;
+      setActiveTab();
+      loadList();
+    });
+
+    document.getElementById('list').addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-action="handled"]');
+      if (!button) return;
+      const card = button.closest('.card');
+      const id = card?.dataset.id;
+      const msg = card?.querySelector('.msg');
+      if (!id) return;
+      button.disabled = true;
+      if (msg) {
+        msg.className = 'msg';
+        msg.textContent = '提交中…';
+      }
+      try {
+        const res = await fetch('/handoff/' + encodeURIComponent(id) + '/handled', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok || !data.ok)
+          throw new Error(data.error || ('HTTP ' + res.status));
+        if (msg) {
+          msg.className = 'msg ok';
+          msg.textContent = '已标记';
+        }
+        await loadList();
+      } catch (error) {
+        button.disabled = false;
+        if (msg) {
+          msg.className = 'msg bad';
+          msg.textContent = error instanceof Error ? error.message : String(error);
+        }
+      }
+    });
+
+    setActiveTab();
+    loadList();
+    setInterval(loadList, 8000);
+  </script>
+</body>
+</html>
