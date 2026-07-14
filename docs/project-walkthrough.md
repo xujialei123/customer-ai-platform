@@ -22,7 +22,7 @@
 
 ### 2.1 项目目标
 
-项目用于统一接入企业微信客服、抖音来客和美团到店团购客服，并通过知识库 RAG、公司订单系统和 OpenClaw 生成建议回复。
+项目用于统一接入企业微信客服、抖音来客和美团到店团购客服，并通过知识库 RAG、公司订单系统和可配置 LLM（默认 Agnes，或自定义 OpenAI 兼容；可选本机 OpenClaw）生成建议回复。可在 `/guide` 热更新 LLM 与 Embedding。
 
 标准业务链路：
 
@@ -32,7 +32,7 @@
   -> UnifiedMessage
   -> 消息去重并入库
   -> 公司订单查询或 RAG 检索
-  -> OpenClaw 生成回复
+  -> 可配置 LLM 生成回复
   -> 风控判断
   -> ReplyDraft / 自动发送
   -> 平台回填或发送
@@ -43,13 +43,13 @@
 | 模块 | 路径 | 作用 | 状态 |
 | --- | --- | --- | --- |
 | 主 API | `apps/api` | 平台入口、消息会话、队列、订单、草稿、扩展网关 | `[已完成]` |
-| 独立 RAG 服务 | `services/rag-service` | 文件上传、解析、切片、Embedding、检索、OpenClaw 回复 | `[已完成]` |
+| 独立 RAG 服务 | `services/rag-service` | 文件上传、解析、切片、Embedding、检索、Wiki；回复 LLM 由 API 侧配置 | `[已完成]` |
 | Chrome 扩展 | `extensions/customer-ai-rpa` | 经营宝 DOM 采集、WebSocket、回复回填和发送 | `[部分完成]` |
 | 共享类型 | `packages/shared` | 平台和 RAG 公共类型 | `[已完成]` |
 | RPA SDK | `packages/rpa-sdk` | RPA 请求 RAG、消息 hash | `[已完成]` |
 | PostgreSQL | Docker `5433` | 业务表、知识库元数据和 pgvector | `[已完成]` |
 | Redis | Docker `6379` | BullMQ 消息队列 | `[已完成]` |
-| 便携 OpenClaw | 外部目录 | 意图判断和回复生成 | `[部分完成]` |
+| 可配置 LLM | `/guide` + `model-config` | Agnes / 自定义兼容接口；OpenClaw 可选 | `[已完成]` |
 
 > `[重点备注]`：`apps/api/src/services/rag.service.ts` 和 `apps/api/src/services/knowledge.service.ts` 属于旧 API 内的兼容 RAG 示例；新知识库页面和当前上传解析主链路位于 `services/rag-service`。新增 RAG 功能应优先修改独立 RAG 服务，避免形成第三套实现。
 
@@ -85,7 +85,7 @@
 
 1. 检查并启动 Docker Desktop。
 2. 启动 PostgreSQL 和 Redis。
-3. 检查或启动便携 OpenClaw。
+3. 确认 `/guide` 或 `.env` 中 LLM / Embedding 已配置（默认 Agnes，无需本机 OpenClaw）。
 4. 启动主 API `3001`。
 5. 启动 RAG 服务和知识库页面 `8787`。
 6. 启动 RPA Mock 页面 `3100`。
@@ -124,11 +124,13 @@ Invoke-RestMethod http://127.0.0.1:3001/rpa/extension/status
 | 路由 | 作用 |
 | --- | --- |
 | `GET /health` | API 健康检查 |
-| `GET /health/openclaw` | OpenClaw 配置与连接检查 |
+| `GET /health/llm` | LLM 是否已配置（Agnes/自定义） |
+| `GET /health/embedding` | Embedding 是否已配置 |
+| `GET /health/openclaw` | 兼容接口；直连模式下等同 LLM 配置态 |
 | `POST /rpa/inbound` | RPA 客户消息入口 |
 | `POST /rpa/outbound` | 平台已发送商家消息入库 |
 | `GET /rpa/extension/status` | Chrome 扩展连接和会话状态 |
-| `POST /rpa/extension/analyze-dom` | OpenClaw 分析脱敏 DOM 候选选择器 |
+| `POST /rpa/extension/analyze-dom` | LLM 分析脱敏 DOM 候选选择器 |
 | `GET /reply-drafts/recent` | 查询客户会话草稿 |
 | `POST /orders/query` | 按订单号查询 |
 | `POST /orders/chat-query` | 从自然语言识别并查询订单 |
@@ -175,7 +177,7 @@ platform + shopId + platformConversationId
 备注：
 
 - `[已完成]` 客户消息和商家实际发送消息双向入库。
-- `[已完成]` 最近 12 条消息进入 OpenClaw，较早消息生成持久化摘要。
+- `[已完成]` 最近 12 条消息进入 LLM，较早消息生成持久化摘要。
 - `[风险]` 旧 API 知识表和独立 RAG 表并存，后续应确定保留策略。
 - `[TODO]` 需要增加数据保留周期、隐私删除和审计策略。
 
@@ -227,7 +229,7 @@ pnpm prisma:studio
   -> BullMQ inbound-message
   -> ReplyWorker
   -> 订单识别 / RAG
-  -> OpenClaw
+  -> LLM
   -> SafetyService
   -> ReplyDraft 或 SendService
 ```
@@ -257,7 +259,7 @@ pnpm prisma:studio
 备注：
 
 - `[已完成]` 支持按订单号和手机号查询。
-- `[已完成]` 查询结果脱敏后再交给 OpenClaw 整理。
+- `[已完成]` 查询结果脱敏后再交给 LLM 整理。
 - `[风险]` 真实账号和密码只能放 `.env`，不能进入代码或日志。
 - `[风险]` 订单状态必须实时查询，不能使用会话摘要中的旧状态回答。
 - `[TODO]` 需要上游正式接口文档和稳定 SLA；不能把当前旧后台协议描述成官方接口。
@@ -295,7 +297,7 @@ pnpm prisma:studio
   -> 其他问题生成 Query Embedding
   -> pgvector TopK
   -> 风险和硬拒绝线判断
-  -> 问题 + TopK 片段传给 OpenClaw
+  -> 问题 + TopK 片段传给 LLM
   -> 后端识别转人工话术
 ```
 
@@ -303,8 +305,8 @@ pnpm prisma:studio
 
 ```text
 无召回或 score < 0.35：直接转人工
-0.35 <= score < 0.65：OpenClaw 低置信证据审查
-score >= 0.65：正常交给 OpenClaw 整理
+0.35 <= score < 0.65：LLM 低置信证据审查
+score >= 0.65：正常交给 LLM 整理
 ```
 
 备注：
@@ -327,7 +329,7 @@ Invoke-RestMethod http://127.0.0.1:8787/api/debug/routes
 Invoke-RestMethod http://127.0.0.1:8787/api/debug/logs/retrieval
 ```
 
-## 第 8 步：理解 OpenClaw
+## 第 8 步：理解可配置 LLM
 
 阅读位置：
 
@@ -338,18 +340,18 @@ Invoke-RestMethod http://127.0.0.1:8787/api/debug/logs/retrieval
 
 职责边界：
 
-- OpenClaw 负责意图判断和组织客服话术。
-- OpenClaw 不直接登录平台。
-- OpenClaw 不直接操作浏览器。
-- OpenClaw 不直接调用未经白名单校验的公司接口。
+- LLM（Agnes/自定义/可选 OpenClaw）负责意图判断和组织客服话术。
+- LLM 不直接登录平台。
+- LLM 不直接操作浏览器。
+- LLM 不直接调用未经白名单校验的公司接口。
 - 平台消息、会话 ID、风控和发送由本项目负责。
 
 备注：
 
-- `[已完成]` 问题、历史和检索片段会一起传给 OpenClaw。
+- `[已完成]` 问题、历史和检索片段会一起传给 LLM。
 - `[已完成]` 证据不足时要求返回固定转人工话术。
-- `[已完成]` RAG OpenClaw 调用改为单次，避免最坏 90 秒重试。
-- `[风险]` 当前曾出现 OpenClaw 超时和无效 JSON，模型不可用时必须安全转人工。
+- `[已完成]` LLM 调用为单次超时，避免最坏长时间重试。
+- `[风险]` 模型超时或无效 JSON 时必须安全转人工；可在 `/guide` 测试连接。
 - `[TODO]` 增加模型延迟、错误率和超时监控。
 
 ## 第 9 步：理解 Chrome 扩展 RPA
@@ -464,7 +466,7 @@ http://127.0.0.1:8787/kb-admin
 备注：
 
 - `[已完成]` 支持 Windows 一体化便携包。
-- `[已完成]` 可复用外部便携 OpenClaw。
+- `[已完成]` 默认 Agnes 直连；可选本机 OpenClaw；配置页可热切换。
 - `[风险]` 打包脚本不得递归跟随 pnpm Junction 删除源目录。
 - `[TODO]` 每次正式发布前必须在全新目录进行启动、停止、重启和数据保留验收。
 
@@ -476,7 +478,7 @@ http://127.0.0.1:8787/kb-admin
 | Prisma 迁移 | `[已完成]` | 已增加会话上下文迁移 |
 | 千问 Embedding + pgvector | `[已完成]` | `text-embedding-v4`，1536 维 |
 | 文件上传、解析和切片 | `[已完成]` | Markdown 按标题切片 |
-| RAG + OpenClaw | `[部分完成]` | 逻辑可用，OpenClaw 偶发超时 |
+| RAG + 可配置 LLM | `[已完成]` | Agnes/自定义热配置；OpenClaw 可选 |
 | 订单真实查询 | `[已完成]` | 使用已跑通旧后台 Adapter |
 | 企业微信真实接入 | `[已完成]` | 仍需生产部署清单 |
 | 美团当前会话采集 | `[已完成]` | Chrome 扩展 + Shadow DOM |
@@ -494,7 +496,7 @@ http://127.0.0.1:8787/kb-admin
 2. 建立 RAG 标准评测集，校准阈值并验证转人工规则。
 3. 完成美团左侧未读会话队列和会话切换保护。
 4. 增加自动发送审计、失败状态和紧急总开关。
-5. 增加 OpenClaw、Embedding、订单系统和 WebSocket 监控。
+5. 增加 LLM、Embedding、订单系统和 WebSocket 监控。
 6. 限制 CORS、调试接口和管理页面访问范围。
 
 ### P1：稳定性完善
@@ -523,7 +525,7 @@ docker compose ps
 Invoke-RestMethod http://127.0.0.1:3001/health
 Invoke-RestMethod http://127.0.0.1:8787/health
 
-# 3. OpenClaw
+# 3. LLM /health/llm
 Invoke-RestMethod http://127.0.0.1:3001/health/openclaw
 
 # 4. RAG 配置和日志

@@ -199,7 +199,7 @@ pnpm package:windows</pre>
         <input type="checkbox" />
         <div>
           <strong>Doctor 自检通过</strong>
-          <p>运行 <code>Doctor-Customer-AI.bat</code>：Portable Node / API / RAG / LLM / Extension / Docker 均为 OK 或 HTTP 200（仅 <code>LLM_PROVIDER=openclaw</code> 时才检查 OpenClaw）。</p>
+          <p>运行 <code>Doctor-Customer-AI.bat</code>：Portable Node（<code>runtime\node-win-x64</code>）/ API / RAG / LLM / Extension / Docker 均为 OK 或 HTTP 200。交付包不再包含 OpenClaw 目录。</p>
         </div>
       </label>
       <label class="item" data-id="boot-3">
@@ -212,9 +212,9 @@ pnpm package:windows</pre>
       <label class="item" data-id="boot-4">
         <input type="checkbox" />
         <div>
-          <strong>配置 Agnes LLM 与知识库</strong>
+          <strong>配置 LLM、Embedding 与知识库</strong>
           <ul>
-            <li>填写便携包 <code>.env</code> 中 <code>AGNES_API_KEY</code>（及 Embedding Key）</li>
+            <li>打开 <code>/guide</code>：选择 Agnes 或自定义 OpenAI 兼容接口，并配置 Embedding</li>
             <li>打开 <code>http://127.0.0.1:8787/kb-admin</code> 上传/编译门店知识库</li>
             <li>在 <code>/guide</code> 配置美团/抖音白名单（灰度期建议只填测试客户）</li>
           </ul>

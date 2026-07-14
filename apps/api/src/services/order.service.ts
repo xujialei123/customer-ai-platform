@@ -49,6 +49,19 @@ class MockOrderAdapter {
             itemName: '门店测试套餐',
             usageStatus: '已核销',
             contactPhoneMasked: '139****9000'
+        },
+        {
+            found: true,
+            orderNo: 'yl_20260704D7Bm7',
+            status: '清洗中',
+            amount: 89,
+            itemName: '任洗套餐',
+            usageStatus: '未核销',
+            pickupStatus: '已取件',
+            deliveryStatus: '待送回',
+            storeName: '测试门店 A',
+            createdAt: '2026-07-04T14:20:00+08:00',
+            contactPhoneMasked: '137****1234'
         }
     ];
     async queryBySearchKey(searchValue) {
@@ -200,7 +213,7 @@ export class OrderService {
                 : new MockOrderAdapter();
     }
     isOrderQuery(message) {
-        return ['订单', '查单', '查状态', '查进度', '物流', '核销状态', '付款状态', '支付状态']
+        return ['订单', '查单', '查状态', '查进度', '物流', '核销状态', '付款状态', '支付状态', '单号', '取件码']
             .some((keyword) => message.includes(keyword));
     }
     extractOrderNo(message) {
@@ -224,10 +237,24 @@ export class OrderService {
     extractPhoneCandidate(message) {
         return message.match(/1[3-9]\d{9}/)?.[0] ?? null;
     }
+    /**
+     * 客服刚在要单号/手机号。口语句式较多（“需要订单号”“把单号发我”），不能只匹配“请提供订单号”。
+     */
     isAwaitingOrderIdentifier(history) {
-        // 只检查最近几轮客服话术，防止很早以前的查单流程长期污染后续普通字母数字消息。
-        return history.slice(-4).some((item) => item.role === 'assistant'
-            && /(提供|发送|补充|确认).{0,12}(订单号|订单编号|单号|下单手机号|手机号|取件码)/.test(item.content));
+        return history.slice(-6).some((item) => {
+            if (item.role !== 'assistant')
+                return false;
+            const text = String(item.content ?? '');
+            return /(提供|发送|补充|确认|需要|麻烦|发给|发我|告诉我?).{0,24}(订单号|订单编号|完整单号|单号|下单手机号|手机号|取件码)/.test(text)
+                || /(订单号|订单编号|完整单号|单号|取件码).{0,20}(发我|发给|发送|提供|补充|发一下)/.test(text);
+        });
+    }
+    /**
+     * 近几轮已经在聊订单（客户或客服任一方提到），允许下一句纯单号进入订单路由。
+     * 避免人设改写后索要话术变体导致 awaiting 判假、纯单号误走知识库。
+     */
+    hasRecentOrderContext(history) {
+        return history.slice(-8).some((item) => /(订单|查单|单号|取件码|核销|洗好了吗|付款状态|支付状态)/.test(String(item.content ?? '')));
     }
     async queryOrder(orderNo) {
         // 返回统一的 found=false 结构而不是让模型根据空结果猜测订单状态。

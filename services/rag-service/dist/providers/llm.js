@@ -63,21 +63,36 @@ export class OpenAICompatibleLLMProvider {
     }
 }
 export class AgenesLLMProvider {
-    // Agenes 是保留的外部 Adapter，返回字段只做兼容读取，不假设其内部模型行为。
+    // Agnes / 历史 Agenes：按 OpenAI chat completions 或旧 Adapter 字段兼容读取。
     async chat(input) {
         return retry(async () => {
-            const response = await fetch(env.AGENES_API_URL, {
+            const url = String(env.AGNES_API_URL || env.AGENES_API_URL || '').trim();
+            const apiKey = String(env.AGNES_API_KEY || env.AGENES_API_KEY || env.LLM_API_KEY || '').trim();
+            const model = String(env.AGNES_MODEL || env.LLM_MODEL || 'agnes-2.0-flash').trim();
+            const chatUrl = url.endsWith('/chat/completions')
+                ? url
+                : (url ? `${url.replace(/\/$/, '')}/chat/completions` : '');
+            if (!chatUrl || !apiKey)
+                throw new Error('Agnes LLM 未配置 URL 或 API Key');
+            const response = await fetch(chatUrl, {
                 method: 'POST',
                 headers: {
-                    Authorization: `Bearer ${env.AGENES_API_KEY}`,
+                    Authorization: `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(input)
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        ...(input.history ?? []),
+                        { role: 'user', content: input.prompt }
+                    ]
+                }),
+                signal: AbortSignal.timeout(env.OPENCLAW_TIMEOUT_MS)
             });
             if (!response.ok)
-                throw new Error(`Agenes 请求失败：${response.status} ${await response.text()}`);
+                throw new Error(`Agnes 请求失败：${response.status} ${await response.text()}`);
             const json = await response.json();
-            return String(json.answer ?? json.reply ?? json.content ?? '').trim();
+            return String(json.choices?.[0]?.message?.content ?? json.answer ?? json.reply ?? json.content ?? '').trim();
         });
     }
 }
@@ -109,12 +124,12 @@ export class OpenClawLLMProvider {
     }
 }
 export function createLLMProvider() {
-    // 普通知识库回复也统一走 OpenClaw，避免订单和 FAQ 使用两套不同模型链路。
+    // Wiki/Rerank 侧 LLM：支持 agnes、自定义兼容接口与可选 openclaw。
     if (env.LLM_PROVIDER === 'openclaw' && env.OPENCLAW_TOKEN)
         return new OpenClawLLMProvider();
-    if (env.LLM_PROVIDER === 'openai-compatible' && env.LLM_API_KEY)
+    if ((env.LLM_PROVIDER === 'openai-compatible' || env.LLM_PROVIDER === 'custom') && env.LLM_API_KEY)
         return new OpenAICompatibleLLMProvider();
-    if (env.LLM_PROVIDER === 'agenes')
+    if (env.LLM_PROVIDER === 'agnes' || env.LLM_PROVIDER === 'agenes')
         return new AgenesLLMProvider();
     return new MockLLMProvider();
 }

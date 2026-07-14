@@ -1,15 +1,17 @@
 # @file scripts/build-windows-portable.ps1
 # @module 数据库、共享包与交付
-# @description 组装 Windows 便携包：构建、依赖、OpenClaw、扩展和文档。
+# @description 组装 Windows 便携包：构建、依赖、便携 Node、扩展和文档（不再捆绑 OpenClaw）。
 # @see 联动关注：排除敏感 data，输出 release 目录。
 #Requires -Version 5.1
+# SafeSendDefaults: force AUTO_REPLY / RPA_AUTO_SEND off for external delivery.
+# Keep param() comments ASCII-only: Windows PowerShell 5.1 misparses UTF-8 Chinese here.
+# NodeRuntimeSource: folder that contains node.exe (portable Node). Optional auto-discover.
 [CmdletBinding()]
 param(
   [string]$OutputPath = '',
-  [string]$OpenClawSource = 'F:\OpenClaw-USB-Portable',
+  [string]$NodeRuntimeSource = '',
   [string]$PnpmCommand = '',
   [switch]$CreateZip,
-  # 交付给外部客户时打开：强制关闭自动发送，忽略开发机 .env 里的开关。
   [switch]$SafeSendDefaults
 )
 
@@ -22,17 +24,37 @@ if (-not $OutputPath) {
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
 $PackageRoot = $OutputPath
 $env:CUSTOMER_AI_PACKAGE_ROOT = $PackageRoot
-$OpenClawSource = [IO.Path]::GetFullPath($OpenClawSource)
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $env:CI = 'true'
 $env:npm_config_confirm_modules_purge = 'false'
 
-if ($PackageRoot -eq $Root -or $PackageRoot -eq $OpenClawSource -or [IO.Path]::GetPathRoot($PackageRoot) -eq $PackageRoot) {
+if ($PackageRoot -eq $Root -or [IO.Path]::GetPathRoot($PackageRoot) -eq $PackageRoot) {
   throw 'Unsafe output path. Cleanup refused.'
 }
-if (-not (Test-Path -LiteralPath (Join-Path $OpenClawSource 'Start-OpenClaw.ps1'))) {
-  throw "OpenClaw portable package is incomplete: $OpenClawSource"
+
+function Resolve-NodeRuntimeSource([string]$Preferred) {
+  $candidates = @()
+  if ($Preferred) { $candidates += $Preferred }
+  $candidates += @(
+    'F:\OpenClaw-USB-Portable\app\runtime\node-win-x64',
+    'E:\nodejs',
+    (Join-Path ${env:ProgramFiles} 'nodejs'),
+    (Join-Path ${env:ProgramFiles(x86)} 'nodejs')
+  )
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+    try {
+      $full = [IO.Path]::GetFullPath($candidate)
+    } catch {
+      continue
+    }
+    if (Test-Path -LiteralPath (Join-Path $full 'node.exe')) { return $full }
+  }
+  throw 'Portable Node runtime not found. Pass -NodeRuntimeSource pointing to a folder that contains node.exe.'
 }
+
+$NodeRuntimeSource = Resolve-NodeRuntimeSource $NodeRuntimeSource
+Write-Host ("Portable Node source: {0}" -f $NodeRuntimeSource) -ForegroundColor DarkGray
 
 function Invoke-Pnpm([string[]]$Arguments) {
   $pnpm = $PnpmCommand
@@ -162,9 +184,8 @@ if ($prismaClientDir) {
   }
 }
 
-Write-Host '3/6 Copying sanitized OpenClaw runtime...' -ForegroundColor Cyan
-Copy-Tree $OpenClawSource (Join-Path $PackageRoot 'openclaw') @((Join-Path $OpenClawSource 'data'))
-New-Item -ItemType Directory -Path (Join-Path $PackageRoot 'openclaw\data') -Force | Out-Null
+Write-Host '3/6 Copying portable Node runtime (OpenClaw not packaged)...' -ForegroundColor Cyan
+Copy-Tree $NodeRuntimeSource (Join-Path $PackageRoot 'runtime\node-win-x64')
 
 Write-Host '4/6 Copying config and launchers...' -ForegroundColor Cyan
 Copy-Item -LiteralPath (Join-Path $Root 'docker-compose.yml') -Destination $PackageRoot
@@ -181,17 +202,20 @@ New-Item -ItemType Directory -Path (Join-Path $PackageRoot 'app\rag-service\uplo
 
 Write-Host '5/6 Generating secret-free config...' -ForegroundColor Cyan
 $envText = [IO.File]::ReadAllText((Join-Path $Root '.env.example'), [Text.Encoding]::UTF8)
+# 便携包不捆绑 OpenClaw，禁止把开发机的 openclaw provider 打进交付包。
+$packagedLlmProvider = if ($SafeSendDefaults) { 'agnes' } else { Resolve-PackagedEnvValue 'LLM_PROVIDER' 'agnes' }
+if ([string]::IsNullOrWhiteSpace($packagedLlmProvider) -or $packagedLlmProvider.Trim().ToLowerInvariant() -eq 'openclaw') {
+  $packagedLlmProvider = 'agnes'
+}
 $values = [ordered]@{
   NODE_ENV = 'production'
-  # 默认直连 Agnes；仅当客户显式设 LLM_PROVIDER=openclaw 时才启本机网关。
-  LLM_PROVIDER = (Resolve-PackagedEnvValue 'LLM_PROVIDER' 'agnes')
+  LLM_PROVIDER = $packagedLlmProvider
   AGNES_API_URL = (Resolve-PackagedEnvValue 'AGNES_API_URL' 'https://apihub.agnes-ai.com/v1/chat/completions')
   # 对外安全打包不带入本机模型 Key；客户到现场自行填写。
   AGNES_API_KEY = $(if ($SafeSendDefaults) { '' } else { Resolve-PackagedEnvValue 'AGNES_API_KEY' '' })
   AGNES_MODEL = (Resolve-PackagedEnvValue 'AGNES_MODEL' 'agnes-2.0-flash')
   OPENCLAW_GATEWAY_URL = 'http://127.0.0.1:18789'
   OPENCLAW_TOKEN = ''
-  # Leave portable OpenClaw paths empty; runtime auto-discovers .\openclaw relative to package root.
   OPENCLAW_PORTABLE_ROOT = ''
   OPENCLAW_TOKEN_FILE = ''
   OPENCLAW_AUTO_START = 'false'
@@ -230,7 +254,8 @@ if (Test-Path -LiteralPath $allowlistLocal) {
 $buildInfo = @(
   'Customer AI Windows Portable',
   "BuiltAt=$([DateTime]::Now.ToString('s'))",
-  'OpenClawDataIncluded=false',
+  'OpenClawBundled=false',
+  'PortableNode=runtime\node-win-x64',
   'ProjectEnvIncluded=false',
   'RpaSessionIncluded=false',
   'RpaMode=chrome-extension-websocket',
@@ -238,13 +263,17 @@ $buildInfo = @(
 ) -join "`r`n"
 [IO.File]::WriteAllText((Join-Path $PackageRoot 'BUILD-INFO.txt'), $buildInfo, $utf8NoBom)
 
-Write-Host '6/6 Checking for sensitive files...' -ForegroundColor Cyan
+Write-Host '6/6 Checking package integrity...' -ForegroundColor Cyan
+$nodeInPackage = Join-Path $PackageRoot 'runtime\node-win-x64\node.exe'
+if (-not (Test-Path -LiteralPath $nodeInPackage)) {
+  throw "Portable Node was not copied: $nodeInPackage"
+}
 $forbidden = @(
-  (Join-Path $PackageRoot 'openclaw\data\.openclaw\gateway-token.txt'),
+  (Join-Path $PackageRoot 'openclaw'),
   (Join-Path $PackageRoot 'data\sessions\meituan-production\Default\Network\Cookies')
 )
 foreach ($path in $forbidden) {
-  if (Test-Path -LiteralPath $path) { throw "Sensitive file must not be packaged: $path" }
+  if (Test-Path -LiteralPath $path) { throw "Must not be packaged: $path" }
 }
 
 if ($CreateZip) {

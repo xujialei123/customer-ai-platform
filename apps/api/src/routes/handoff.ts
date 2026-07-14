@@ -2,7 +2,7 @@
 /**
  * @file apps/api/src/routes/handoff.ts
  * @module API Adapter 与路由
- * @description 转人工工作台：复用 ReplyDraft 高/中风险草稿，提供列表与已处理标记。
+ * @description 转人工工作台：复用 ReplyDraft 高风险草稿，提供列表与已处理标记。
  * @see 联动关注：SafetyService、reply-drafts、handoff.html。
  */
 import { existsSync } from 'node:fs';
@@ -17,7 +17,8 @@ const runtimeRoot = process.env.CUSTOMER_AI_ROOT
     ? resolve(process.env.CUSTOMER_AI_ROOT)
     : resolve(currentDir, '../../../../');
 
-const HANDOFF_RISK_LEVELS = ['high', 'medium'];
+// 仅高风险进转人工台；空召回 medium 仍走 AI 澄清，避免正常咨询把台子刷满。
+const HANDOFF_RISK_LEVELS = ['high'];
 const OPEN_STATUSES = ['pending', 'approved', 'dispatching'];
 
 function resolveHandoffHtmlPath() {

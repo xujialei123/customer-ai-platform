@@ -3,26 +3,31 @@
  * @file apps/api/src/services/embedding.service.ts
  * @module API Service 与 Worker
  * @description API 旧知识表 Embedding 兼容实现。
- * @see 联动关注：新检索由 8787 rag-service 负责。
+ * @see 联动关注：新检索由 8787 rag-service 负责；model-config 热切换。
  */
 import { createHash } from 'node:crypto';
 import { env } from '../config/env.js';
+import { getActiveEmbeddingTarget } from '../config/model-config.js';
+
 export class EmbeddingService {
     // 调用 OpenAI-compatible embedding API。
     // 如果未配置真实 key，则使用本地确定性向量，保证 MVP 本地 RAG 链路可以先跑通。
     async embedText(text) {
-        if (this.shouldUseLocalFallback()) {
+        const target = await getActiveEmbeddingTarget();
+        if (!target.configured) {
             return this.embedTextLocally(text);
         }
-        const res = await fetch(`${env.EMBEDDING_BASE_URL}/embeddings`, {
+        const res = await fetch(`${target.baseUrl}/embeddings`, {
             method: 'POST',
             headers: {
-                Authorization: `Bearer ${env.EMBEDDING_API_KEY}`,
+                Authorization: `Bearer ${target.apiKey}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                model: env.EMBEDDING_MODEL,
-                input: text
+                model: target.model,
+                input: text,
+                dimensions: env.EMBEDDING_DIM,
+                encoding_format: 'float'
             })
         });
         if (!res.ok) {
@@ -31,9 +36,6 @@ export class EmbeddingService {
         }
         const json = await res.json();
         return json.data[0].embedding;
-    }
-    shouldUseLocalFallback() {
-        return !env.EMBEDDING_API_KEY || env.EMBEDDING_API_KEY === 'replace-me';
     }
     /**
      * 生成本地确定性向量。

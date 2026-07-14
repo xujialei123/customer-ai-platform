@@ -39,7 +39,7 @@ const envSchema = z.object({
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1),
     // LLM：默认直连 Agnes / OpenAI 兼容接口；openclaw 仅作可选本机网关。
-    LLM_PROVIDER: z.enum(['agnes', 'agenes', 'openai-compatible', 'openclaw']).default('agnes'),
+    LLM_PROVIDER: z.enum(['agnes', 'agenes', 'openai-compatible', 'custom', 'openclaw']).default('agnes'),
     LLM_BASE_URL: z.string().optional().default(''),
     LLM_API_KEY: z.string().optional().default(''),
     LLM_MODEL: z.string().optional().default(''),
@@ -160,15 +160,15 @@ function resolveLlmTarget() {
             requiresLocalGateway: false
         };
     }
-    if (provider === 'openai-compatible') {
+    if (provider === 'openai-compatible' || provider === 'custom') {
         const url = llmBase.endsWith('/chat/completions')
             ? llmBase
             : `${llmBase}/chat/completions`;
         return {
-            provider: 'openai-compatible',
+            provider: 'custom',
             url,
             apiKey: llmKey || agnesKey,
-            model: llmModel || agnesModel || 'gpt-4.1-mini',
+            model: llmModel || agnesModel || '',
             requiresLocalGateway: false
         };
     }

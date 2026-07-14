@@ -404,7 +404,7 @@
             </div>
           </div>
           <div class="step-body">
-            <p class="goal">目标：能自己画出「Docker / API 3001 / RAG 8787 / Mock 3100 / OpenClaw」关系图。</p>
+            <p class="goal">目标：能自己画出「Docker / API 3001 / RAG 8787 / Mock 3100 / 可配置 LLM」关系图（OpenClaw 仅可选）。</p>
             <label class="file" data-id="s1-pkg">
               <input type="checkbox" />
               <div>
@@ -416,7 +416,7 @@
               <input type="checkbox" />
               <div>
                 <div class="path">apps/api/src/dev/run-all.ts <span class="tag must">必读</span></div>
-                <div class="meta">开发编排器：Docker、OpenClaw、API、RAG、Mock、专用 Chrome。</div>
+                <div class="meta">开发编排器：Docker、可选 OpenClaw、API、RAG、Mock、专用 Chrome（默认 Agnes 跳过网关）。</div>
                 <div class="hint">梳理排障时优先看这里，很多“端口被占用”问题源头在这。</div>
               </div>
             </label>
@@ -431,7 +431,7 @@
               <input type="checkbox" />
               <div>
                 <div class="path">.env.example → .env <span class="tag must">必读</span></div>
-                <div class="meta">环境变量模板：自动发送开关、白名单、OpenClaw、订单后台、RAG Key。</div>
+                <div class="meta">环境变量模板：自动发送开关、白名单、Agnes/LLM、Embedding、订单后台、RAG Key；也可用 /guide 热配置。</div>
                 <div class="hint">改完 .env 通常要重启 pnpm dev。白名单也可在 /guide 页运行时改。</div>
               </div>
             </label>
@@ -522,7 +522,7 @@
               <div>
                 <div class="path">apps/api/src/adapters/* <span class="tag must">必读</span></div>
                 <div class="meta">douyin-rpa / meituan-rpa / wecom：把平台原始 payload 转 UnifiedMessage。</div>
-                <div class="hint">index.ts 负责按 platform 选 Adapter。新平台只加 Adapter，不要让 OpenClaw 直连平台。</div>
+                <div class="hint">index.ts 负责按 platform 选 Adapter。新平台只加 Adapter，不要让 LLM 直连平台。</div>
               </div>
             </label>
             <label class="file" data-id="s3-conv">
@@ -557,7 +557,7 @@
             <div class="num">5</div>
             <div>
               <h3>ReplyWorker：回复大脑</h3>
-              <p>队列消费者：订单优先，否则 RAG，再 OpenClaw，再风控，最后写草稿。</p>
+              <p>队列消费者：订单优先，否则 RAG，再可配置 LLM，再风控，最后写草稿。</p>
             </div>
           </div>
           <div class="step-body">
@@ -566,7 +566,7 @@
               <input type="checkbox" />
               <div>
                 <div class="path">apps/api/src/workers/reply.worker.ts <span class="tag must">必读</span></div>
-                <div class="meta">回复主链路排障入口。先订单路由，非订单才 RAG → OpenClaw → Safety → ReplyDraft。</div>
+                <div class="meta">回复主链路排障入口。先订单路由，非订单才 RAG → LLM → Safety → ReplyDraft。</div>
               </div>
             </label>
             <label class="file" data-id="s4-rag-api">
@@ -581,7 +581,7 @@
               <input type="checkbox" />
               <div>
                 <div class="path">apps/api/src/services/openclaw.service.ts <span class="tag must">必读</span></div>
-                <div class="meta">调用 OpenClaw 生成回复；失败有本地兜底草稿。</div>
+                <div class="meta">调用可配置 LLM（model-config）生成回复；失败有本地兜底草稿。</div>
               </div>
             </label>
             <label class="file" data-id="s4-safety">

@@ -20,13 +20,13 @@
     <div class="nav"><a href="#preflight">1. 上线前检查</a><a href="#dev">2. 开发部署</a><a href="#portable">3. Windows 便携交付</a><a href="#production">4. 生产基线</a><a href="#rpa">5. RPA 灰度</a><a href="#acceptance">6. 验收与回滚</a></div>
 
     <section id="preflight"><h2>一、上线前检查</h2>
-      <div class="grid"><div class="card"><h3>必需软件</h3><p>Node.js 20+、pnpm 9.15、Docker Desktop、Google Chrome。源码部署还需要 PostgreSQL/pgvector 与 Redis，默认可由 Docker Compose 提供。</p></div><div class="card"><h3>端口</h3><p><code>3001</code> API、<code>8787</code> RAG、<code>18789</code> OpenClaw、<code>5433</code> PostgreSQL、<code>6379</code> Redis。生产机防火墙只应按实际访问范围开放。</p></div><div class="card"><h3>安全默认值</h3><p><code>AUTO_REPLY_ENABLED=false</code>、<code>RPA_AUTO_SEND_ENABLED=false</code>、<code>RPA_DRY_RUN=true</code>。首次上线不得跳过灰度。</p></div></div>
-      <div class="ok"><strong>OpenClaw 路径：</strong>便携包固定使用包根下的 <code>openclaw/</code>。<code>OPENCLAW_PORTABLE_ROOT</code> / <code>OPENCLAW_TOKEN_FILE</code> 可留空，由运行时按相对路径自动发现；仅开发机 OpenClaw 在项目外时才在本机 <code>.env</code> 写绝对路径覆盖。</div>
-      <div class="danger"><strong>密钥边界：</strong>模型 Key、平台 Token、Cookie、账号密码只放部署机环境变量或密钥系统，不写入仓库、便携包和 HTML。</div>
+      <div class="grid"><div class="card"><h3>必需软件</h3><p>Node.js 20+、pnpm 9.15、Docker Desktop、Google Chrome。源码部署还需要 PostgreSQL/pgvector 与 Redis，默认可由 Docker Compose 提供。</p></div><div class="card"><h3>端口</h3><p><code>3001</code> API、<code>8787</code> RAG、<code>5433</code> PostgreSQL、<code>6379</code> Redis。本机 OpenClaw <code>18789</code> 仅在 <code>LLM_PROVIDER=openclaw</code> 时需要。</p></div><div class="card"><h3>安全默认值</h3><p><code>AUTO_REPLY_ENABLED=false</code>、<code>RPA_AUTO_SEND_ENABLED=false</code>、<code>RPA_DRY_RUN=true</code>。首次上线不得跳过灰度。</p></div></div>
+      <div class="ok"><strong>模型配置：</strong>默认直连 Agnes 或自定义 OpenAI 兼容接口。优先在 <code>http://127.0.0.1:3001/guide</code> 配置 LLM 与 Embedding（热生效）。便携包<strong>不再捆绑 OpenClaw</strong>，仅携带 <code>runtime\node-win-x64</code> 用于启动 API/RAG。</div>
+      <div class="danger"><strong>密钥边界：</strong>模型 Key、平台 Token、Cookie、账号密码只放部署机环境变量、配置页或密钥系统，不写入仓库和对外交付包。完整 API Key 不会回传给前端。</div>
     </section>
 
     <section id="dev"><h2>二、源码开发部署</h2>
-      <ol><li>复制 <code>.env.example</code> 为 <code>.env</code>，逐项填写真实配置。</li><li>启动依赖并迁移数据库。</li><li>构建全部工作区，再启动服务。</li></ol>
+      <ol><li>复制 <code>.env.example</code> 为 <code>.env</code>，或启动后到 <code>/guide</code> 填写 LLM / Embedding。</li><li>启动依赖并迁移数据库。</li><li>构建全部工作区，再启动服务。</li></ol>
       <pre>chcp 65001
 $OutputEncoding = [System.Text.Encoding]::UTF8
 Copy-Item .env.example .env
@@ -35,18 +35,19 @@ docker compose up -d
 pnpm prisma:migrate
 pnpm build:all
 pnpm dev</pre>
-      <div class="ok"><strong>最小健康检查：</strong><code>http://127.0.0.1:3001/health</code>、<code>http://127.0.0.1:3001/health/openclaw</code>、<code>http://127.0.0.1:8787/health</code> 均应正常；知识库管理页为 <code>http://127.0.0.1:8787/kb-admin</code>。</div>
+      <div class="ok"><strong>最小健康检查：</strong><code>http://127.0.0.1:3001/health</code>、<code>http://127.0.0.1:3001/health/llm</code>、<code>http://127.0.0.1:3001/health/embedding</code>、<code>http://127.0.0.1:8787/health</code> 均应正常；配置引导页 <code>http://127.0.0.1:3001/guide</code>；知识库管理页 <code>http://127.0.0.1:8787/kb-admin</code>。</div>
+      <div class="warn"><strong>注意：</strong>不要从便携包测试环境带走 <code>CUSTOMER_AI_ROOT</code> 环境变量再跑源码 <code>pnpm dev</code>，否则会误读便携包 <code>.env</code>。开发编排器会强制把 <code>CUSTOMER_AI_ROOT</code> 指回仓库根目录。</div>
     </section>
 
     <section id="portable"><h2>三、Windows 便携交付</h2>
       <pre>pnpm build:all
 pnpm package:windows</pre>
-      <ol><li>从 <code>release\Customer-AI-Portable-YYYYMMDD-HHmmss</code> 取完整目录，不拆散内部结构。</li><li>交付前确认包内没有项目 <code>.env</code>、OpenClaw data、Cookie、会话目录和日志。</li><li>客户机安装 Docker Desktop 与 Chrome，双击 <code>Start-Customer-AI.bat</code>。</li><li>在引导页配置模型服务；从 <code>chrome://extensions</code> 以开发者模式加载 <code>extensions\customer-ai-rpa</code>。</li><li>停止使用 <code>Stop-Customer-AI.bat</code>，诊断使用 <code>Doctor-Customer-AI.bat</code>。</li></ol>
+      <ol><li>从 <code>release\Customer-AI-Portable-YYYYMMDD-HHmmss</code> 取完整目录，不拆散内部结构。</li><li>对外交付建议加 <code>-SafeSendDefaults</code>，并避免把本机模型 Key 打进包。</li><li>客户机安装 Docker Desktop 与 Chrome，双击 <code>Start-Customer-AI.bat</code>。</li><li>打开引导页 <code>http://127.0.0.1:3001/guide</code>：配置 Agnes 或自定义 LLM、Embedding、白名单；再于 <code>chrome://extensions</code> 加载 <code>extensions\customer-ai-rpa</code>。</li><li>停止使用 <code>Stop-Customer-AI.bat</code>，诊断使用 <code>Doctor-Customer-AI.bat</code>。</li></ol>
       <div class="warn">便携包是 Windows 单机交付方式，不等同于高可用生产集群。数据库卷、知识库和浏览器 Profile 必须纳入客户机备份。</div>
     </section>
 
     <section id="production"><h2>四、生产部署基线</h2>
-      <table><thead><tr><th>组件</th><th>生产要求</th><th>验收</th></tr></thead><tbody><tr><td>API / ReplyWorker</td><td>建议拆分进程；配置进程守护、结构化日志和失败告警。</td><td>进程重启后消息不重复生成草稿。</td></tr><tr><td>PostgreSQL</td><td>启用 pgvector；独立账号、最小权限、每日备份和恢复演练。</td><td>迁移完成，业务表与 RAG 表均可读写。</td></tr><tr><td>Redis</td><td>启用持久化与访问控制；禁止暴露公网。</td><td>BullMQ waiting/active/failed 可观测。</td></tr><tr><td>RAG / 模型</td><td>使用真实 embedding 与 LLM；设置超时和调用配额。</td><td>门店问题可召回证据，无证据固定转人工。</td></tr><tr><td>入口安全</td><td>外部 Webhook 使用 HTTPS 反向代理；校验签名、限制来源和请求大小。</td><td>伪造回调被拒绝，健康接口不泄密。</td></tr></tbody></table>
+      <table><thead><tr><th>组件</th><th>生产要求</th><th>验收</th></tr></thead><tbody><tr><td>API / ReplyWorker</td><td>建议拆分进程；配置进程守护、结构化日志和失败告警。</td><td>进程重启后消息不重复生成草稿。</td></tr><tr><td>PostgreSQL</td><td>启用 pgvector；独立账号、最小权限、每日备份和恢复演练。</td><td>迁移完成，业务表与 RAG 表均可读写。</td></tr><tr><td>Redis</td><td>启用持久化与访问控制；禁止暴露公网。</td><td>BullMQ waiting/active/failed 可观测。</td></tr><tr><td>RAG / 模型</td><td>使用真实 Embedding 与 LLM（Agnes 或自定义兼容接口）；设置超时和调用配额；维度与 <code>EMBEDDING_DIM</code> 一致。</td><td>门店问题可召回证据，无证据固定转人工；<code>/guide</code> 可查看与热切换配置。</td></tr><tr><td>入口安全</td><td>外部 Webhook 使用 HTTPS 反向代理；校验签名、限制来源和请求大小。</td><td>伪造回调被拒绝，健康接口不泄密。</td></tr></tbody></table>
       <div class="warn">当前 Chrome 扩展 RPA 依赖客服电脑的已登录页面。若需要无人值守、多机容灾或集中调度，需另行建设持久化租约、心跳选主、发送审计和人工接管工作台后再宣称生产高可用。</div>
     </section>
 
@@ -59,8 +60,8 @@ pnpm package:windows</pre>
       <p>便携包 RPA 专项验收清单见包内 <code>portable-test-checklist.html</code>（打包时随 <code>packaging/windows-portable</code> 一并复制）。</p>
       <h3>发布验收</h3><pre>pnpm --filter @customer-ai/api test
 pnpm build:all</pre>
-      <ul><li>检查 <code>docs/project-flow.html</code> 与本手册能直接打开、中文可读、UTF-8 无 BOM。</li><li>重复投递同一 messageId，只入库一次且只产生一份队列任务/草稿。</li><li>白名单外客户不入库、不排队、不回填、不发送。</li><li>RAG 失败、OpenClaw 失败和高风险问题均保留人工草稿，不伪装成功。</li></ul>
-      <h3>备份</h3><p>备份 PostgreSQL、Redis 持久化数据（如启用）、知识库上传目录、运行时配置与 Chrome Profile。密钥备份应使用独立加密介质。</p>
+      <ul><li>检查 <code>docs/project-flow.html</code> 与本手册能直接打开、中文可读、UTF-8 无 BOM。</li><li>重复投递同一 messageId，只入库一次且只产生一份队列任务/草稿。</li><li>白名单外客户不入库、不排队、不回填、不发送。</li><li>RAG 失败、LLM 失败和高风险问题均保留人工草稿，不伪装成功。</li><li>在 <code>/guide</code> 切换 Agnes / 自定义后，新消息走新模型；Embedding 变更后注意维度并重编译知识库。</li></ul>
+      <h3>备份</h3><p>备份 PostgreSQL、Redis 持久化数据（如启用）、知识库上传目录、<code>config/model.local.json</code>（含密钥，需加密）、运行时配置与 Chrome Profile。密钥备份应使用独立加密介质。</p>
       <h3>回滚</h3><ol><li>先关闭两个自动发送开关，保留人工接管。</li><li>停止应用进程，恢复上一版本应用目录和匹配的环境配置。</li><li>数据库迁移仅按已评审的回滚 SQL 执行；不使用破坏性 reset。</li><li>重新运行健康检查和只读链路测试，最后再恢复白名单灰度。</li></ol>
       <p><a href="project-flow.html">返回项目流程总览</a></p>
     </section>

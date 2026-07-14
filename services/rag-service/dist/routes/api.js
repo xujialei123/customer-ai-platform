@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import { env, safeEnvView } from '../config/env.js';
+import { applyEmbeddingRuntimeConfig, getActiveEmbeddingTarget } from '../config/runtime-config.js';
 import { RagApplication } from '../services/rag-application.js';
 import { repository } from '../services/store.js';
 import { BrainSync } from '../brain/brain-sync.js';
@@ -75,6 +76,28 @@ export async function apiRoutes(app) {
     const hybridRag = new HybridRagService();
     await rag.bootstrapFromUploads();
     app.get('/health', async () => ({ ok: true, service: 'rag-service' }));
+    // 配置页热更新 Embedding，供 API model-config 转发；需 RAG API Key。
+    app.put('/admin/runtime-config', async (request, reply) => {
+        requireApiKey(request);
+        const body = request.body ?? {};
+        if (body.embedding) {
+            const applied = applyEmbeddingRuntimeConfig(body.embedding);
+            return reply.send({ ok: true, embedding: applied });
+        }
+        return reply.send({ ok: true, embedding: await getActiveEmbeddingTarget() });
+    });
+    app.get('/admin/runtime-config', async (request, reply) => {
+        requireApiKey(request);
+        const embedding = await getActiveEmbeddingTarget();
+        return reply.send({
+            ok: true,
+            embedding: {
+                baseUrl: embedding.baseUrl,
+                model: embedding.model,
+                configured: embedding.configured
+            }
+        });
+    });
     app.get('/api/kb/list', async (request, reply) => {
         requireApiKey(request);
         return reply.send({

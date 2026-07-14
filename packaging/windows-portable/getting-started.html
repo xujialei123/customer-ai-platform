@@ -220,6 +220,52 @@
     }
     .allowlist-msg.ok { color: var(--green); }
     .allowlist-msg.bad { color: var(--red); }
+    .model-box {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .model-box h3 { margin: 0 0 8px; font-size: 15px; }
+    .model-box p.hint {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .model-box label {
+      display: block;
+      margin: 10px 0 6px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .model-box input, .model-box select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 12px;
+      font: inherit;
+      font-size: 13px;
+      background: #fff;
+    }
+    .model-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+      align-items: center;
+    }
+    .model-actions button {
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .model-msg { font-size: 12px; color: var(--muted); }
+    .model-msg.ok { color: var(--green); }
+    .model-msg.bad { color: var(--red); }
     .tag {
       display: inline-block;
       border-radius: 999px;
@@ -272,14 +318,8 @@
             <li class="step">
               <div class="num">2</div>
               <div>
-                <h3>填写 LLM（Agnes）与 Embedding</h3>
-                <p>编辑便携包根目录 <code>.env</code>。默认直连 Agnes，无需启动本机 OpenClaw。至少配置：</p>
-                <ul>
-                  <li><code>LLM_PROVIDER=agnes</code>（默认）</li>
-                  <li><code>AGNES_API_URL</code>、<code>AGNES_API_KEY</code>、<code>AGNES_MODEL</code></li>
-                  <li><code>EMBEDDING_API_KEY</code> 等向量检索相关项</li>
-                </ul>
-                <p>若改用本机 OpenClaw，设置 <code>LLM_PROVIDER=openclaw</code> 后再启动网关。</p>
+                <h3>填写大模型与 Embedding</h3>
+                <p>在本页右侧「大模型 / Embedding」中选择 <strong>Agnes</strong> 或 <strong>自定义 OpenAI 兼容接口</strong>，并配置向量模型。保存后立即生效，无需重启。</p>
               </div>
             </li>
             <li class="step">
@@ -349,6 +389,44 @@
               <tr><th>读取中…</th><td></td></tr>
             </tbody>
           </table>
+
+          <div class="model-box">
+            <h3>大模型（客服回复）</h3>
+            <p class="hint">协议为 OpenAI 兼容 <code>/chat/completions</code>。选 Agnes 会填入官方默认；其它厂商请选「自定义」自行填写。</p>
+            <label for="llmProvider">提供商</label>
+            <select id="llmProvider">
+              <option value="agnes">Agnes</option>
+              <option value="custom">自定义（OpenAI 兼容）</option>
+            </select>
+            <label for="llmBaseUrl">Base URL</label>
+            <input id="llmBaseUrl" type="text" autocomplete="off" placeholder="https://…/v1 或完整 …/chat/completions" />
+            <label for="llmModel">Model</label>
+            <input id="llmModel" type="text" autocomplete="off" placeholder="模型名" />
+            <label for="llmApiKey">API Key</label>
+            <input id="llmApiKey" type="password" autocomplete="new-password" placeholder="已保存则留空不修改" />
+            <div class="model-actions">
+              <button type="button" class="btn-primary" id="saveLlmBtn">保存 LLM</button>
+              <button type="button" class="btn-secondary" id="testLlmBtn">测试连接</button>
+              <span class="model-msg" id="llmMsg"></span>
+            </div>
+          </div>
+
+          <div class="model-box">
+            <h3>Embedding（知识库向量）</h3>
+            <p class="hint">OpenAI 兼容 <code>/embeddings</code>。请保证模型输出维度与当前 <code>EMBEDDING_DIM</code> 一致，否则需重编译知识库。</p>
+            <label for="embBaseUrl">Base URL</label>
+            <input id="embBaseUrl" type="text" autocomplete="off" placeholder="例如 https://…/compatible-mode/v1" />
+            <label for="embModel">Model</label>
+            <input id="embModel" type="text" autocomplete="off" placeholder="例如 text-embedding-v4" />
+            <label for="embApiKey">API Key</label>
+            <input id="embApiKey" type="password" autocomplete="new-password" placeholder="已保存则留空不修改" />
+            <div class="model-actions">
+              <button type="button" class="btn-primary" id="saveEmbBtn">保存 Embedding</button>
+              <button type="button" class="btn-secondary" id="testEmbBtn">测试连接</button>
+              <span class="model-msg" id="embMsg"></span>
+            </div>
+          </div>
+
           <div class="allowlist-box">
             <h3>客户白名单</h3>
             <p>每行一个客户 ID 或昵称，也可用英文逗号分隔。清空并保存后，对应平台对所有客户开放自动回复。</p>
@@ -377,6 +455,11 @@
   </footer>
 
   <script>
+    const AGNES_DEFAULT_URL = 'https://apihub.agnes-ai.com/v1/chat/completions';
+    const AGNES_DEFAULT_MODEL = 'agnes-2.0-flash';
+    let modelFormTouched = false;
+    let knownLlmPresets = null;
+
     function setDot(id, state) {
       const el = document.getElementById(id);
       if (!el) return;
@@ -385,6 +468,54 @@
 
     function tag(text, kind) {
       return '<span class="tag ' + kind + '">' + text + '</span>';
+    }
+
+    function setModelMsg(id, text, kind) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.className = 'model-msg ' + (kind || '');
+      el.textContent = text || '';
+    }
+
+    function fillModelForms(data) {
+      if (modelFormTouched) return;
+      const llm = data.llm || {};
+      const emb = data.embedding || {};
+      knownLlmPresets = data.presets || null;
+      const providerEl = document.getElementById('llmProvider');
+      const baseEl = document.getElementById('llmBaseUrl');
+      const modelEl = document.getElementById('llmModel');
+      const keyEl = document.getElementById('llmApiKey');
+      if (providerEl && document.activeElement !== providerEl)
+        providerEl.value = (llm.provider === 'custom' || llm.provider === 'openai-compatible') ? 'custom' : 'agnes';
+      if (baseEl && document.activeElement !== baseEl)
+        baseEl.value = llm.baseUrl || '';
+      if (modelEl && document.activeElement !== modelEl)
+        modelEl.value = llm.model || '';
+      if (keyEl && document.activeElement !== keyEl)
+        keyEl.placeholder = llm.hasApiKey ? ('已保存 ' + (llm.apiKeyMasked || '') + '，留空不修改') : '请输入 API Key';
+
+      const embBase = document.getElementById('embBaseUrl');
+      const embModel = document.getElementById('embModel');
+      const embKey = document.getElementById('embApiKey');
+      if (embBase && document.activeElement !== embBase)
+        embBase.value = emb.baseUrl || '';
+      if (embModel && document.activeElement !== embModel)
+        embModel.value = emb.model || '';
+      if (embKey && document.activeElement !== embKey)
+        embKey.placeholder = emb.hasApiKey ? ('已保存 ' + (emb.apiKeyMasked || '') + '，留空不修改') : '请输入 API Key';
+    }
+
+    function applyLlmProviderDefaults() {
+      const provider = document.getElementById('llmProvider')?.value || 'agnes';
+      const baseEl = document.getElementById('llmBaseUrl');
+      const modelEl = document.getElementById('llmModel');
+      if (provider === 'agnes') {
+        if (baseEl && !baseEl.value.trim())
+          baseEl.value = (knownLlmPresets?.agnes?.baseUrl) || AGNES_DEFAULT_URL;
+        if (modelEl && !modelEl.value.trim())
+          modelEl.value = (knownLlmPresets?.agnes?.model) || AGNES_DEFAULT_MODEL;
+      }
     }
 
     function fillAllowlistInputs(data) {
@@ -418,8 +549,8 @@
         }
 
         const rows = [
-          ['LLM_PROVIDER', data.config?.llmProvider || data.llm?.provider || '-'],
-          ['LLM_MODEL', data.config?.llmModel || data.llm?.model || '-'],
+          ['LLM', (data.config?.llmProvider || data.llm?.provider || '-') + ' / ' + (data.config?.llmModel || data.llm?.model || '-')],
+          ['Embedding', data.embedding?.configured ? (data.config?.embeddingModel || data.embedding?.model || tag('已配置', 'ok')) : tag('未配置', 'warn')],
           ['AUTO_REPLY_ENABLED', data.config?.autoReplyEnabled ? tag('已开启', 'ok') : tag('未开启', 'warn')],
           ['RPA_AUTO_SEND_ENABLED', data.config?.rpaAutoSendEnabled ? tag('已开启', 'ok') : tag('未开启', 'warn')],
           ['MEITUAN_RPA_MODE', data.config?.meituanRpaMode || '-'],
@@ -438,6 +569,14 @@
         document.querySelector('#configTable tbody').innerHTML =
           '<tr><th>状态</th><td>' + tag('无法读取服务状态，请确认 API 已启动', 'bad') + '</td></tr>';
       }
+    }
+
+    async function refreshModelConfig() {
+      try {
+        const res = await fetch('/guide/llm', { cache: 'no-store' });
+        const data = await res.json();
+        if (data.ok) fillModelForms(data);
+      } catch (_) { /* ignore */ }
     }
 
     function setAllowlistMsg(text, kind) {
@@ -467,6 +606,105 @@
       }
     }
 
+    async function saveLlm() {
+      setModelMsg('llmMsg', '保存中…');
+      try {
+        const body = {
+          provider: document.getElementById('llmProvider')?.value || 'agnes',
+          baseUrl: document.getElementById('llmBaseUrl')?.value || '',
+          model: document.getElementById('llmModel')?.value || '',
+          apiKey: document.getElementById('llmApiKey')?.value || ''
+        };
+        const res = await fetch('/guide/llm', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok)
+          throw new Error(data.error || ('HTTP ' + res.status));
+        modelFormTouched = false;
+        document.getElementById('llmApiKey').value = '';
+        fillModelForms(data);
+        setModelMsg('llmMsg', '已保存并立即生效', 'ok');
+        await refreshStatus();
+      } catch (error) {
+        setModelMsg('llmMsg', '保存失败：' + (error instanceof Error ? error.message : String(error)), 'bad');
+      }
+    }
+
+    async function testLlm() {
+      setModelMsg('llmMsg', '测试中…');
+      try {
+        const body = {
+          provider: document.getElementById('llmProvider')?.value || 'agnes',
+          baseUrl: document.getElementById('llmBaseUrl')?.value || '',
+          model: document.getElementById('llmModel')?.value || '',
+          apiKey: document.getElementById('llmApiKey')?.value || ''
+        };
+        const res = await fetch('/guide/llm/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!data.ok)
+          throw new Error(data.error || '测试失败');
+        setModelMsg('llmMsg', '连接成功（' + (data.model || '') + '）', 'ok');
+      } catch (error) {
+        setModelMsg('llmMsg', '测试失败：' + (error instanceof Error ? error.message : String(error)), 'bad');
+      }
+    }
+
+    async function saveEmbedding() {
+      setModelMsg('embMsg', '保存中…');
+      try {
+        const body = {
+          baseUrl: document.getElementById('embBaseUrl')?.value || '',
+          model: document.getElementById('embModel')?.value || '',
+          apiKey: document.getElementById('embApiKey')?.value || ''
+        };
+        const res = await fetch('/guide/embedding', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok)
+          throw new Error(data.error || ('HTTP ' + res.status));
+        modelFormTouched = false;
+        document.getElementById('embApiKey').value = '';
+        fillModelForms(data);
+        const ragHint = data.ragSync?.ok === false ? ('；RAG 同步：' + (data.ragSync.error || '失败')) : '';
+        setModelMsg('embMsg', '已保存并立即生效' + ragHint, data.ragSync?.ok === false ? 'bad' : 'ok');
+        await refreshStatus();
+      } catch (error) {
+        setModelMsg('embMsg', '保存失败：' + (error instanceof Error ? error.message : String(error)), 'bad');
+      }
+    }
+
+    async function testEmbedding() {
+      setModelMsg('embMsg', '测试中…');
+      try {
+        const body = {
+          baseUrl: document.getElementById('embBaseUrl')?.value || '',
+          model: document.getElementById('embModel')?.value || '',
+          apiKey: document.getElementById('embApiKey')?.value || ''
+        };
+        const res = await fetch('/guide/embedding/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!data.ok)
+          throw new Error(data.error || '测试失败');
+        setModelMsg('embMsg', '连接成功（' + (data.model || '') + '）', 'ok');
+      } catch (error) {
+        setModelMsg('embMsg', '测试失败：' + (error instanceof Error ? error.message : String(error)), 'bad');
+      }
+    }
+
     document.getElementById('saveAllowlistBtn')?.addEventListener('click', () => {
       saveAllowlist({
         meituanText: document.getElementById('meituanAllowlist')?.value || '',
@@ -481,7 +719,20 @@
       saveAllowlist({ meituanText: '', douyinText: '' });
     });
 
+    document.getElementById('saveLlmBtn')?.addEventListener('click', saveLlm);
+    document.getElementById('testLlmBtn')?.addEventListener('click', testLlm);
+    document.getElementById('saveEmbBtn')?.addEventListener('click', saveEmbedding);
+    document.getElementById('testEmbBtn')?.addEventListener('click', testEmbedding);
+    document.getElementById('llmProvider')?.addEventListener('change', () => {
+      modelFormTouched = true;
+      applyLlmProviderDefaults();
+    });
+    ['llmBaseUrl', 'llmModel', 'llmApiKey', 'embBaseUrl', 'embModel', 'embApiKey'].forEach((id) => {
+      document.getElementById(id)?.addEventListener('input', () => { modelFormTouched = true; });
+    });
+
     refreshStatus();
+    refreshModelConfig();
     setInterval(refreshStatus, 8000);
   </script>
 </body>

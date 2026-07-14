@@ -9,7 +9,7 @@
 首次使用：
 1. 安装并启动 Docker Desktop。
 2. 双击 Start-Customer-AI.bat，浏览器会自动打开配置引导页 http://127.0.0.1:3001/guide 。
-3. 按引导页步骤填写 .env（AGNES_API_KEY 等）、加载 Chrome 扩展并上传知识库。默认直连 Agnes，无需本机 OpenClaw。
+3. 打开引导页配置大模型（Agnes 或自定义）与 Embedding，加载 Chrome 扩展并上传知识库。
 4. 打开 Chrome 扩展管理页 chrome://extensions，开启开发者模式。
 5. 选择“加载已解压的扩展程序”，选择 extensions\customer-ai-rpa。
 6. 在客服平台页面中人工登录一次，插件会通过本地 WebSocket 连接服务。

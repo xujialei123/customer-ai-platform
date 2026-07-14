@@ -27,14 +27,14 @@ if ([string]::IsNullOrWhiteSpace($provider)) { $provider = 'agnes' }
 $needsOpenClaw = ($provider.Trim().ToLowerInvariant() -eq 'openclaw')
 
 $checks = @(
-  @{ Name = 'Portable Node'; Path = Join-Path $Root 'openclaw\app\runtime\node-win-x64\node.exe' },
+  @{ Name = 'Portable Node'; Path = Join-Path $Root 'runtime\node-win-x64\node.exe' },
   @{ Name = 'API'; Path = Join-Path $Root 'app\backend\dist\main.js' },
   @{ Name = 'RAG'; Path = Join-Path $Root 'app\rag-service\dist\main.js' },
   @{ Name = 'RPA Extension'; Path = Join-Path $Root 'extensions\customer-ai-rpa\manifest.json' },
   @{ Name = 'Config'; Path = Join-Path $Root '.env' }
 )
 if ($needsOpenClaw) {
-  $checks += @{ Name = 'OpenClaw'; Path = Join-Path $Root 'openclaw\Start-OpenClaw.ps1' }
+  Write-Host 'OpenClaw       NOT BUNDLED (self-host gateway on 18789, or switch LLM_PROVIDER)' -ForegroundColor Yellow
 }
 foreach ($check in $checks) {
   $ok = Test-Path -LiteralPath $check.Path

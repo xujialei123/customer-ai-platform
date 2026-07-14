@@ -12,7 +12,7 @@
 
 ## 架构说明
 
-首次接手、整体梳理或准备项目汇报时，请先打开：[代码整体梳理指南（HTML）](docs/code-review-guide.html)（可勾选进度）。文字版见：[项目梳理指南](docs/project-walkthrough.md)。文档按启动、API、数据库、消息、订单、RAG、OpenClaw、RPA、企微和部署顺序标注了当前状态、风险与 TODO。
+首次接手、整体梳理或准备项目汇报时，请先打开：[代码整体梳理指南（HTML）](docs/code-review-guide.html)（可勾选进度）。文字版见：[项目梳理指南](docs/project-walkthrough.md)。文档按启动、API、数据库、消息、订单、RAG、可配置 LLM、RPA、企微和部署顺序标注了当前状态、风险与 TODO。
 
 标准链路：
 
@@ -20,12 +20,13 @@
 平台 Webhook / RPA
   -> Platform Adapter / RPA Client
   -> UnifiedMessage / askRagService
-  -> rag-service
-  -> 知识库解析、切分、embedding、向量检索
-  -> LLM / Agenes / Mock LLM
-  -> Handoff 风控
-  -> dryRun 建议回复或人工审核
+  -> rag-service（Hybrid RAG 检索）
+  -> 可配置 LLM（默认 Agnes，或自定义 OpenAI 兼容；可选本机 OpenClaw）
+  -> Safety / Handoff 风控
+  -> 自动发送或 ReplyDraft 人工审核
 ```
+
+客服回复 LLM 与 Embedding 可在配置页热更新：`http://127.0.0.1:3001/guide`（Agnes / 自定义 Base URL + Model + API Key）。无需写死其它厂商预设。
 
 当前保留旧 `apps/api` demo，不破坏原有 `/rpa/inbound`、ReplyWorker、企业微信 webhook；新增 `services/rag-service` 作为独立 RAG 服务。RPA watcher 会继续投递旧 API，同时调用统一 RPA client 获取 RAG 建议回复。
 
@@ -108,18 +109,27 @@ pnpm install --no-optional
 copy .env.example .env
 ```
 
-默认本地优先跑通：
+默认本地优先跑通（也可启动后在 `/guide` 页填写，热生效）：
 
 ```env
-VECTOR_STORE=memory
-EMBEDDING_PROVIDER=mock
-LLM_PROVIDER=mock
-RPA_DRY_RUN=true
+VECTOR_STORE=pgvector
+EMBEDDING_PROVIDER=openai-compatible
+EMBEDDING_BASE_URL=
+EMBEDDING_API_KEY=
+EMBEDDING_MODEL=
+LLM_PROVIDER=agnes
+AGNES_API_URL=https://apihub.agnes-ai.com/v1/chat/completions
+AGNES_API_KEY=
+AGNES_MODEL=agnes-2.0-flash
 AUTO_REPLY_ENABLED=false
 RPA_AUTO_SEND_ENABLED=false
 ```
 
-`mock` 只用于开发验证，不能用于真实客服检索质量评估。生产或真实测试请配置 OpenAI-compatible embedding 和 LLM。
+- **LLM**：`agnes`（推荐）或自定义时设 `LLM_PROVIDER=openai-compatible` 并填 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。
+- **Embedding**：OpenAI 兼容 `/embeddings`；注意模型维度与 `EMBEDDING_DIM` / `VECTOR_DIM` 一致。
+- `mock` Embedding 仅作离线兜底，不能用于真实召回评估。
+
+配置页：`http://127.0.0.1:3001/guide`（大模型 + Embedding + RPA 白名单）。
 
 ## 初始化数据库
 
@@ -269,31 +279,34 @@ pnpm --filter @customer-ai/api rpa:mock-watch
 
 企业微信仍走 `apps/api/src/routes/webhooks.wecom.ts` 的官方 webhook 占位。后续可在企业微信 Adapter 或 ReplyWorker 中复用 `packages/rpa-sdk` 的 `askRagService`，让企微消息也统一进入 `rag-service`。当前 `rag-service` 已支持 `platform=wecom` 的 chat 请求和 prompt。
 
-## 便携 OpenClaw
+## 大模型与 Embedding（配置页）
 
-项目支持复用外部便携版 OpenClaw，不复制其程序、模型配置和密钥。开发启动器会先检查本地网关，未运行时再调用便携包启动脚本：
+客服回复默认直连 Agnes（OpenAI 兼容 chat/completions）。其它厂商在配置页选「自定义」自行填写 Base URL / Model / Key，不内置易过时的厂商预设。
+
+```text
+http://127.0.0.1:3001/guide
+```
+
+- 保存后写 `config/model.local.json`、同步根 `.env`，API 立即生效；Embedding 会转发 RAG `PUT /admin/runtime-config`。
+- 健康检查：`/health/llm`、`/health/embedding`（旧 `/health/openclaw` 在直连模式下反映 LLM 是否已配置）。
+
+## 可选：本机 OpenClaw
+
+仅当 `LLM_PROVIDER=openclaw` 时需要本机网关。开发机可指向外部便携包：
 
 ```env
+LLM_PROVIDER=openclaw
 OPENCLAW_GATEWAY_URL=http://127.0.0.1:18789
 OPENCLAW_PORTABLE_ROOT=F:\OpenClaw-USB-Portable
 OPENCLAW_TOKEN_FILE=F:\OpenClaw-USB-Portable\data\.openclaw\gateway-token.txt
 OPENCLAW_AUTO_START=true
-OPENCLAW_MODEL=openclaw/default
-OPENCLAW_CHAT_ENDPOINT=/v1/chat/completions
-OPENCLAW_TIMEOUT_MS=30000
 ```
 
-`OPENCLAW_TOKEN_FILE` 配置后，API 会显式按 UTF-8 读取便携包生成的 token，因此不需要在项目 `.env` 中重复保存 token。`pnpm dev` 会等待网关就绪后再启动 API、RAG 和 RPA。可使用以下地址检查连接状态：
-
-```text
-http://127.0.0.1:3001/health/openclaw
-```
-
-OpenClaw 只负责意图判断和生成回复；平台登录、消息采集、会话校验与发送仍由本项目 RPA Adapter 管理。
+默认 `LLM_PROVIDER=agnes` 时 `pnpm dev` **不会**启动 OpenClaw。LLM 只负责话术；平台登录、采集与发送仍由本项目 Adapter / Chrome 扩展管理。
 
 ## 公司订单系统查询
 
-旧 API 已增加订单系统 Adapter。默认使用 `mock`，可以先测试订单查询和 OpenClaw 上下文注入：
+旧 API 已增加订单系统 Adapter。默认使用 `mock`，可以先测试订单查询和 LLM 上下文注入：
 
 ```powershell
 $body = @{ orderNo = "TEST-ORDER-001" } | ConvertTo-Json
@@ -335,7 +348,7 @@ ADMIN_PASSWORD=
 }
 ```
 
-如果公司原始字段不同，应在专用 Adapter 中按接口文档映射，不能把原始客户隐私或鉴权信息直接传给 OpenClaw。
+如果公司原始字段不同，应在专用 Adapter 中按接口文档映射，不能把原始客户隐私或鉴权信息直接传给 LLM。
 
 ## 调试接口
 
@@ -349,7 +362,7 @@ curl http://127.0.0.1:8787/api/debug/logs/retrieval
 
 ## Windows 一体化便携包
 
-便携包包含生产构建、生产依赖、便携 Node、干净的 OpenClaw 程序、Chrome RPA 扩展、项目流程文档及启停/诊断脚本。不会复制当前项目 `.env`、OpenClaw `data`、经营宝 Cookie、聊天记录或日志。
+便携包包含生产构建、生产依赖、便携 Node（`runtime\node-win-x64`）、Chrome RPA 扩展、项目流程文档及启停/诊断脚本。**不再捆绑 OpenClaw**，默认直连 Agnes / 自定义 LLM。不会复制当前项目密钥 `.env`、经营宝 Cookie、聊天记录或日志（打包时可按项目 `.env` 继承非敏感项；对外交付宜用 `-SafeSendDefaults`）。若本机没有便携 Node，打包时可传 `-NodeRuntimeSource` 指向含 `node.exe` 的目录。
 
 生成目录包：
 
@@ -369,15 +382,15 @@ release\Customer-AI-Portable-YYYYMMDD-HHmmss
 Start-Customer-AI.bat
 ```
 
-首次使用需要客户在 OpenClaw 配置页填写自己的模型 API Key，并在 Chrome 的 `chrome://extensions` 中加载 `extensions\customer-ai-rpa` 扩展。之后客户在自己的 Chrome 中登录客服平台，插件通过本地 WebSocket 连接 `http://127.0.0.1:3001`，不再由 Playwright 托管真实平台登录态。停止服务使用 `Stop-Customer-AI.bat`，运行状态检查使用 `Doctor-Customer-AI.bat`。数据库卷、知识库文件、插件配置和网页登录态会保留在客户电脑，不随停止操作删除。
+首次使用打开引导页 `http://127.0.0.1:3001/guide`，配置 LLM（Agnes 或自定义 OpenAI 兼容）与 Embedding，并在 Chrome 的 `chrome://extensions` 中加载 `extensions\customer-ai-rpa`。之后客户在自己的 Chrome 中登录客服平台，插件通过本地 WebSocket 连接 `http://127.0.0.1:3001`。停止服务使用 `Stop-Customer-AI.bat`，运行状态检查使用 `Doctor-Customer-AI.bat`。数据库卷、知识库文件、插件配置和网页登录态会保留在客户电脑，不随停止操作删除。
 
-便携包启动后会自动打开：
+便携包启动后会自动打开引导页：
 
 ```text
-http://127.0.0.1:8787/kb-admin
-http://127.0.0.1:3001/rpa/extension/status
-docs\project-flow.html
+http://127.0.0.1:3001/guide
 ```
+
+知识库、插件状态与流程文档也可分别打开：`http://127.0.0.1:8787/kb-admin`、`http://127.0.0.1:3001/rpa/extension/status`、`docs\project-flow.html`。
 
 ## 常见问题
 
@@ -388,10 +401,10 @@ PDF 没解析出内容怎么办：
 确认文件已 ingest 且状态为 `completed`，`kbIds` 传对了。Memory 模式服务重启会清空内存数据。
 
 为什么回复转人工：
-命中敏感词、没有召回、最高分低于 `RAG_HARD_FLOOR`、连续 AI 回复过多、LLM 调用失败、知识库冲突都会转人工。`RAG_HARD_FLOOR` 到 `RAG_SCORE_THRESHOLD` 之间的候选会连同问题交给 OpenClaw 做证据判断；证据不足时模型必须返回固定转人工话术，后端会再次标记为转人工。
+命中敏感词、没有召回、最高分低于 `RAG_HARD_FLOOR`、连续 AI 回复过多、LLM 调用失败、知识库冲突都会转人工。`RAG_HARD_FLOOR` 到 `RAG_SCORE_THRESHOLD` 之间的候选会连同问题交给 LLM 做证据判断；证据不足时模型必须返回固定转人工话术，后端会再次标记为转人工。
 
 embedding key 没配怎么办：
-默认 `EMBEDDING_PROVIDER=mock` 可以跑通流程，但真实召回质量必须配置 OpenAI-compatible embedding。
+可在 `/guide` 配置 Embedding；未配置真实 Key 时会走 mock 向量，仅能验证流程。真实召回请配置 OpenAI 兼容 Embedding。
 
 pgvector 没装怎么办：
 先用 `VECTOR_STORE=memory` 跑通；安装 PostgreSQL 和 pgvector 后执行 `scripts/init-db.sql`，再切换 `VECTOR_STORE=pgvector`。

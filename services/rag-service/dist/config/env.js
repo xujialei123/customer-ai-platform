@@ -41,7 +41,7 @@ const envSchema = z.object({
     EMBEDDING_BASE_URL: z.string().default('https://api.openai.com/v1'),
     EMBEDDING_API_KEY: z.string().default(''),
     EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
-    LLM_PROVIDER: z.enum(['mock', 'openai-compatible', 'agenes', 'openclaw']).default('mock'),
+    LLM_PROVIDER: z.enum(['mock', 'openai-compatible', 'agnes', 'agenes', 'custom', 'openclaw']).default('mock'),
     LLM_BASE_URL: z.string().default('https://api.openai.com/v1'),
     LLM_API_KEY: z.string().default(''),
     LLM_MODEL: z.string().default('gpt-4.1-mini'),
@@ -51,6 +51,10 @@ const envSchema = z.object({
     OPENCLAW_MODEL: z.string().default('openclaw/default'),
     OPENCLAW_CHAT_ENDPOINT: z.string().default('/v1/chat/completions'),
     OPENCLAW_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    // Agnes 官方拼写；兼容历史 AGENES_*。
+    AGNES_API_URL: z.string().optional().default(''),
+    AGNES_API_KEY: z.string().optional().default(''),
+    AGNES_MODEL: z.string().optional().default('agnes-2.0-flash'),
     AGENES_API_URL: z.string().default('http://127.0.0.1:18888/chat'),
     AGENES_API_KEY: z.string().default(''),
     RAG_TOP_K: z.coerce.number().default(5),
@@ -85,8 +89,14 @@ function resolveOpenClawToken(tokenFile) {
     return parsedEnv.OPENCLAW_TOKEN;
 }
 const openClawTokenFile = resolveOpenClawTokenFile();
+const llmProviderRaw = String(parsedEnv.LLM_PROVIDER || 'mock').toLowerCase();
+const llmProviderNormalized = llmProviderRaw === 'agenes' ? 'agnes' : llmProviderRaw;
 export const env = {
     ...parsedEnv,
+    LLM_PROVIDER: llmProviderNormalized,
+    AGNES_API_URL: String(parsedEnv.AGNES_API_URL || parsedEnv.AGENES_API_URL || '').trim(),
+    AGNES_API_KEY: String(parsedEnv.AGNES_API_KEY || parsedEnv.AGENES_API_KEY || '').trim(),
+    AGNES_MODEL: String(parsedEnv.AGNES_MODEL || parsedEnv.LLM_MODEL || 'agnes-2.0-flash').trim(),
     OPENCLAW_TOKEN_FILE: openClawTokenFile,
     OPENCLAW_TOKEN: resolveOpenClawToken(openClawTokenFile)
 };
@@ -96,6 +106,7 @@ export function safeEnvView() {
         RAG_API_KEY: env.RAG_API_KEY ? '***' : '',
         EMBEDDING_API_KEY: env.EMBEDDING_API_KEY ? '***' : '',
         LLM_API_KEY: env.LLM_API_KEY ? '***' : '',
+        AGNES_API_KEY: env.AGNES_API_KEY ? '***' : '',
         AGENES_API_KEY: env.AGENES_API_KEY ? '***' : ''
     };
 }

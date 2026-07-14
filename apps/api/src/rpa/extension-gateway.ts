@@ -106,7 +106,8 @@ async function readDrafts(client, apiBaseUrl) {
         polledSessions.add(pollKey);
         if (!isRpaCustomerAllowed(session)) {
             // 白名单变更或旧 content script 重连时，旧会话不能继续轮询草稿，防止正式页误回非测试客户。
-            client.sessions.delete(`${session.platform}:${session.conversationId}`);
+            for (const key of [session.conversationId, session.customerName, session.customerId].filter(Boolean))
+                client.sessions.delete(`${session.platform}:${key}`);
             continue;
         }
         const result = await fetchRecentDrafts(session, apiBaseUrl);
@@ -118,37 +119,62 @@ async function readDrafts(client, apiBaseUrl) {
         const unrepliedDrafts = unsentDrafts.filter((draft) => draft.alreadyReplied !== true);
         for (const draft of unsentDrafts) {
             if (draft.alreadyReplied === true && !client.draftPushState.has(draft.id)) {
+                // 切回话时轮询会再次碰到已发送草稿：只静默标记，勿把「已恢复」全文再刷一遍终端。
                 client.draftPushState.set(draft.id, { allowAutoSend: false, skipped: true, reason: 'already_replied' });
+            }
+        }
+        // 只推「当前期望消息」对应的草稿；无匹配时不回放历史 pending，避免慢模型时把旧答再发一遍。
+        const matchedDrafts = unrepliedDrafts.filter((draft) => client.expectedMessageIds.has(draft.messageId));
+        // 兜底：近 10 分钟内仍 pending 且未成功点击的草稿——防止 expected 登记与 Worker 竞态、或 duplicated 撤回导致永远不推。
+        const recentOrphanRescue = unrepliedDrafts.filter((draft) => {
+            if (matchedDrafts.some((item) => item.id === draft.id))
+                return false;
+            const createdAt = new Date(draft.createdAt || 0).getTime();
+            if (!createdAt || Date.now() - createdAt > 10 * 60 * 1000)
+                return false;
+            const previous = client.draftPushState.get(draft.id);
+            if (previous?.clicked === true)
+                return false;
+            if (previous?.allowAutoSend === true && previous?.clickFailed !== true)
+                return false;
+            // 曾因「当时还没有 expected」被跳过的，允许再推。
+            if (previous?.skipped && !['not_latest_unreplied', 'orphan_pending_warn'].includes(previous.reason))
+                return false;
+            // medium/high 也允许进填入框；真正点击仍只看 low + 开关。
+            return true;
+        });
+        const candidates = matchedDrafts.length > 0 ? matchedDrafts : recentOrphanRescue.slice(-1);
+        // 自动发送每轮最多处理一条，避免连点。
+        const draftsToPush = client.autoSendEnabled ? candidates.slice(-1) : candidates;
+        if (unrepliedDrafts.length > 0 && matchedDrafts.length === 0 && client.expectedMessageIds.size === 0) {
+            const orphan = unrepliedDrafts[unrepliedDrafts.length - 1];
+            if (orphan && !client.draftPushState.has(`warn:${orphan.id}`)) {
+                client.draftPushState.set(`warn:${orphan.id}`, { skipped: false, reason: 'orphan_pending_warn' });
                 terminalLog('warn', {
                     platform: session.platform,
                     customer: session.customerName || session.customerId || session.conversationId,
-                    denyReason: 'already_replied',
-                    userMessage: draft.userMessage,
-                    content: draft.content
+                    denyReason: 'draft_waiting_expected_message',
+                    content: `pending=${unrepliedDrafts.length} expected=0`
                 });
             }
         }
-        // 只推本轮刚入库消息对应的草稿；没有匹配时绝不回退到历史 pending。
-        // 否则 OpenClaw 较慢时，会把上一问未清掉的草稿再次填进输入框并自动发送。
-        const matchedDrafts = unrepliedDrafts.filter((draft) => client.expectedMessageIds.has(draft.messageId));
-        const candidates = matchedDrafts;
-        // 自动发送每轮最多处理一条，避免连点。
-        const draftsToPush = client.autoSendEnabled ? candidates.slice(-1) : candidates;
         for (const draft of unrepliedDrafts) {
             if (candidates.some((item) => item.id === draft.id))
                 continue;
+            // 不要用 skipped=true 永久烧死：Worker 可能比 expected 登记更快，下一轮还需能推送。
             if (!client.draftPushState.has(draft.id))
-                client.draftPushState.set(draft.id, { allowAutoSend: false, skipped: true, reason: 'not_latest_unreplied' });
+                client.draftPushState.set(draft.id, { allowAutoSend: false, skipped: false, reason: 'not_latest_unreplied' });
         }
         for (const draft of draftsToPush) {
             if (draft.status === 'sent')
                 continue;
             const previousPush = client.draftPushState.get(draft.id);
-            if (previousPush?.skipped)
+            // 仅 already_replied / 客户端已点击 才永久跳过；not_latest 允许补推。
+            if (previousPush?.skipped && previousPush?.reason === 'already_replied')
                 continue;
-            // 仅当客户端明确回报点击失败时才重推；禁止「20 秒无回执」把同一条旧回复再发一遍。
-            if (previousPush?.clicked === true)
+            if (previousPush?.reason === 'client_clicked' || previousPush?.clicked === true)
                 continue;
+            // 仅当客户端明确回报点击失败时才重推；禁止「无回执」把同一条旧回复再发一遍。
             if (previousPush?.allowAutoSend === true && previousPush?.clickFailed !== true)
                 continue;
             if (previousPush?.allowAutoSend && previousPush?.clickFailed === true) {
@@ -156,8 +182,13 @@ async function readDrafts(client, apiBaseUrl) {
                 if (Date.now() - pushedAt < 8000)
                     continue;
             }
-            const isExpectedMessage = client.expectedMessageIds.has(draft.messageId);
-            const cooldownPassed = Date.now() - client.lastAutoSendAt >= 8000;
+            const isExpectedMessage = client.expectedMessageIds.has(draft.messageId)
+                || recentOrphanRescue.some((item) => item.id === draft.id);
+            // 冷却按平台分开：美团连发不应堵住抖音自动点击（两平台共用同一个扩展 WS）。
+            if (!client.lastAutoSendAtByPlatform)
+                client.lastAutoSendAtByPlatform = new Map();
+            const lastPlatformSendAt = client.lastAutoSendAtByPlatform.get(session.platform) ?? 0;
+            const cooldownPassed = Date.now() - lastPlatformSendAt >= 8000;
             const allowPlatformRpaAutoSend = isRpaCustomerAllowed(session);
             // 冷却未到时不要烧掉 expectedMessageId，也不要 fill_only 占位，等下一轮再自动发送最新一条。
             if (client.autoSendEnabled
@@ -189,14 +220,21 @@ async function readDrafts(client, apiBaseUrl) {
                                 : (!isExpectedMessage || !allowPlatformRpaAutoSend)
                                     ? 'session_not_authorized'
                                     : 'unknown';
-            // 已经 fill_only 过且本次仍不能自动发送：不要反复刷输入框。
-            if (previousPush && !previousPush.allowAutoSend && !allowAutoSend)
-                continue;
+            // 已经 fill_only 过且本次仍不能自动发送：短时间内不要反复刷输入框；超过 25s 允许补推（会话抢切后首次可能落空）。
+            if (previousPush && !previousPush.allowAutoSend && !allowAutoSend) {
+                const pushedAt = previousPush.pushedAt ?? 0;
+                if (Date.now() - pushedAt < 25000)
+                    continue;
+            }
             client.draftPushState.set(draft.id, { allowAutoSend, pushedAt: Date.now(), clicked: null, clickFailed: false });
-            if (allowAutoSend || draft.alreadyReplied === true || !isExpectedMessage)
+            if (allowAutoSend || draft.alreadyReplied === true || !isExpectedMessage) {
                 client.expectedMessageIds.delete(draft.messageId);
-            if (allowAutoSend)
+                client.expectedMessageMeta?.delete?.(draft.messageId);
+            }
+            if (allowAutoSend) {
                 client.lastAutoSendAt = Date.now();
+                client.lastAutoSendAtByPlatform.set(session.platform, Date.now());
+            }
             sendFrame(client.socket, {
                 type: 'draft',
                 session,
@@ -238,10 +276,7 @@ async function handleMessage(client, apiBaseUrl, raw) {
             sendFrame(client.socket, { type: 'ignored_session', payload: { reason: 'customer_not_allowed', session: message.payload } });
             return;
         }
-        const session = message.payload;
-        const keys = new Set([session.conversationId, session.customerName, session.customerId].filter(Boolean));
-        for (const key of keys)
-            client.sessions.set(`${session.platform}:${key}`, session);
+        registerClientSession(client, message.payload);
         sendFrame(client.socket, { type: 'connected', payload: { clientId: client.id, ...buildRpaAllowlistStatus() } });
         return;
     }
@@ -333,32 +368,71 @@ async function handleMessage(client, apiBaseUrl, raw) {
         });
         return;
     }
+    const endpoint = message.type === 'outbound' ? '/rpa/outbound' : '/rpa/inbound';
+    // inbound：先乐观登记 expected，再 await 入库。Worker 可能在几百毫秒内出草稿，若等 API 返回才登记，会被轮询打成 skipped 后永不推送。
+    let optimisticInboundId = '';
     if (message.type === 'inbound' && message.payload?.id) {
-        // 同一会话只保留最新入站期望草稿，避免抖音历史 pending 排队连发。
+        optimisticInboundId = String(message.payload.id);
         const conversationId = String(message.payload.conversationId || '');
         if (conversationId) {
             for (const existingId of [...client.expectedMessageIds]) {
-                if (String(existingId).startsWith(`${conversationId}:`))
+                const sameConversation = String(existingId).startsWith(`${conversationId}:`)
+                    || client.expectedMessageMeta?.get?.(existingId) === conversationId;
+                if (sameConversation)
                     client.expectedMessageIds.delete(existingId);
             }
         }
-        client.expectedMessageIds.add(message.payload.id);
+        client.expectedMessageIds.add(optimisticInboundId);
+        if (!client.expectedMessageMeta)
+            client.expectedMessageMeta = new Map();
+        client.expectedMessageMeta.set(optimisticInboundId, conversationId);
+        registerClientSession(client, {
+            platform: message.payload.platform,
+            shopId: message.payload.shopId,
+            conversationId: message.payload.conversationId,
+            customerId: message.payload.customerId,
+            customerName: message.payload.customerName,
+            pageUrl: message.payload.pageUrl || ''
+        });
     }
-    const endpoint = message.type === 'outbound' ? '/rpa/outbound' : '/rpa/inbound';
     const response = await fetch(new URL(endpoint, apiBaseUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify(message.payload)
     });
     const result = await response.json().catch(() => ({ ok: false }));
-    // 重复入站（含内容短时去重）不会生成新草稿；清掉本次抖动 ID，避免卡住 expected 集合。
-    if (message.type === 'inbound' && message.payload?.id && (result.duplicated || !response.ok))
-        client.expectedMessageIds.delete(message.payload.id);
+    if (message.type === 'inbound' && optimisticInboundId) {
+        // 仅 HTTP 失败才撤销乐观登记。duplicated 表示消息已在库（可能草稿已在排队），删 expected 会导致 expected=0 永不推送。
+        if (!response.ok) {
+            client.expectedMessageIds.delete(optimisticInboundId);
+            client.expectedMessageMeta?.delete?.(optimisticInboundId);
+        }
+        else if (result?.messageId || result?.message?.id) {
+            const realId = String(result.messageId || result.message.id);
+            if (realId && realId !== optimisticInboundId) {
+                client.expectedMessageIds.delete(optimisticInboundId);
+                client.expectedMessageMeta?.delete?.(optimisticInboundId);
+                client.expectedMessageIds.add(realId);
+                client.expectedMessageMeta?.set?.(realId, String(message.payload.conversationId || ''));
+            }
+        }
+    }
     sendFrame(client.socket, {
         type: response.ok ? `${message.type}_ack` : 'error',
         requestId: message.requestId,
         payload: result
     });
+}
+
+/** 把入站/hello 会话登记到轮询表（多 key，便于按 conversationId / 昵称查询草稿）。 */
+function registerClientSession(client, session) {
+    if (!session?.platform || !isRpaCustomerAllowed(session))
+        return;
+    const keys = new Set([session.conversationId, session.customerName, session.customerId].filter(Boolean));
+    if (!keys.size)
+        return;
+    for (const key of keys)
+        client.sessions.set(`${session.platform}:${key}`, session);
 }
 
 /**
@@ -403,8 +477,10 @@ export function registerRpaExtensionGateway(server, apiPort) {
             connectedAt: Date.now(),
             pollingDrafts: false,
             lastAutoSendAt: 0,
+            lastAutoSendAtByPlatform: new Map(),
             draftPushState: new Map(),
-            expectedMessageIds: new Set()
+            expectedMessageIds: new Set(),
+            expectedMessageMeta: new Map()
         };
         clients.add(client);
         sendFrame(socket, { type: 'connected', payload: { clientId: client.id, ...buildRpaAllowlistStatus() } });

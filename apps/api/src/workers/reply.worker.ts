@@ -39,15 +39,18 @@ export function startReplyWorker() {
         let ragMs = 0;
         let openclawMs = 0;
         // 必须先恢复多轮上下文并执行订单路由；订单号属于工具参数，不能先送到知识库检索。
-        const history = await messageService.getRecentHistory(conversation.id, 12, inboundMessage.id);
+        // 多取几轮；默认只生成草稿时会把 pending 草稿并入历史，模型才能「记住」上一句客服怎么说。
+        const history = await messageService.getRecentHistory(conversation.id, 16, inboundMessage.id);
         const awaitingOrderIdentifier = orderService.isAwaitingOrderIdentifier(history);
+        // 客户先说「查订单」再单独发单号时，即使客服话术没命中 awaiting 模板，也应走订单系统。
+        const allowBareOrderId = awaitingOrderIdentifier || orderService.hasRecentOrderContext(history);
         const ragContext = [];
-        // 当前句有查单意图，或上一轮客服明确索要订单号时，才允许把纯字母数字串当作订单号。
+        // 当前句有查单意图，或近轮已在查单时，才允许把纯字母数字串当作订单号。
         // 查询结果会转换成脱敏、只读的检索片段，与知识库一起交给 OpenClaw，不暴露原始接口数据。
         const orderNo = orderService.extractOrderNo(inboundMessage.content)
-            ?? (awaitingOrderIdentifier ? orderService.extractOrderNoCandidate(inboundMessage.content) : null);
+            ?? (allowBareOrderId ? orderService.extractOrderNoCandidate(inboundMessage.content) : null);
         const orderPhone = orderService.extractPhone(inboundMessage.content)
-            ?? (awaitingOrderIdentifier ? orderService.extractPhoneCandidate(inboundMessage.content) : null);
+            ?? (allowBareOrderId ? orderService.extractPhoneCandidate(inboundMessage.content) : null);
         let routedToOrderSystem = false;
         if (orderNo) {
             routedToOrderSystem = true;
@@ -104,17 +107,22 @@ export function startReplyWorker() {
                 const openclawStarted = Date.now();
                 const result = await openClawClient.generateReply({
                     message: inboundMessage.content,
-                    // 客服回复只要近几轮即可；过长历史会显著拖慢本地 OpenClaw。
-                    conversationHistory: history.slice(-6),
+                    // 近 10 条轮次（含并入的待发草稿）；摘要单独传，避免 slice 丢掉前情。
+                    conversationHistory: history.slice(-10),
+                    conversationSummary: conversation.summary || undefined,
                     ragContext
                 });
                 openclawMs = Date.now() - openclawStarted;
-                reply = result.content;
+                // 超时/失败兜底也必须有对客正文；空字符串时再铺一层人话，避免千篇一律。
+                reply = String(result.content || '').trim()
+                    || (result.raw?.timedOut
+                        ? '抱歉让您久等了，我再帮您核对一下，稍等。'
+                        : '不好意思，这个点我需要再确认一下，您方便说得再具体一点吗？');
                 raw = result.raw;
             }
             catch (error) {
-                console.warn('[ReplyWorker] OpenClaw 生成失败，已转为人工草稿：', error instanceof Error ? error.message : String(error));
-                reply = '这个我帮您转人工确认一下。';
+                console.warn('[ReplyWorker] OpenClaw 生成失败，已使用兜底话术：', error instanceof Error ? error.message : String(error));
+                reply = '不好意思，我这边刚才有点卡，您方便再说一下具体想咨询什么吗？';
                 raw = { error: error instanceof Error ? error.message : String(error) };
             }
         }
@@ -180,7 +188,8 @@ export function startReplyWorker() {
                         ragContext: ragContext
                     }
                 });
-                if (finalRisk.riskLevel === 'high' || finalRisk.riskLevel === 'medium') {
+                // 只有高风险才进转人工台；空召回的 medium 仍可先用 AI 澄清，避免正常闲聊被标 needs_human。
+                if (finalRisk.riskLevel === 'high') {
                     await prisma.conversation.update({
                         where: { id: conversation.id },
                         data: { status: 'needs_human' }
@@ -200,6 +209,7 @@ export function startReplyWorker() {
             // 默认路径：生成回复草稿。
             // 美团/抖音由插件根据 RPA_AUTO_SEND_ENABLED + 弹窗开关决定是否点击发送。
             const draftReason = finalRisk.reason
+                ?? (raw?.timedOut ? 'LLM 超时，已使用本地兜底回复' : undefined)
                 ?? (isBrowserRpaPlatform
                     ? (env.RPA_AUTO_SEND_ENABLED ? '等待浏览器 RPA/插件发送' : 'RPA 自动发送未开启，仅回填待确认')
                     : undefined);
@@ -215,8 +225,8 @@ export function startReplyWorker() {
                     ragContext: ragContext
                 }
             });
-            // 高/中风险进入转人工工作台；会话打上 needs_human，方便后续筛选。
-            if (finalRisk.riskLevel === 'high' || finalRisk.riskLevel === 'medium') {
+            // 高风险进入转人工工作台；medium（如暂无召回）仍保留 AI 草稿，不立刻 needs_human。
+            if (finalRisk.riskLevel === 'high') {
                 await prisma.conversation.update({
                     where: { id: conversation.id },
                     data: { status: 'needs_human' }

@@ -51,14 +51,18 @@ export class RagService {
             });
             if (hybridResponse.ok) {
                 const hybridBody = await hybridResponse.json();
-                if ((hybridBody.results ?? []).length > 0) {
-                    return hybridBody.results.map((item) => ({
-                        id: item.id,
-                        content: item.content,
-                        metadata: { ...(item.metadata ?? {}), title: item.title, retrieval: 'hybrid-card' },
-                        score: Number(item.score ?? 0)
-                    }));
-                }
+                const hybridHits = (hybridBody.results ?? [])
+                    .map((item) => ({
+                    id: item.id,
+                    content: item.content,
+                    metadata: { ...(item.metadata ?? {}), title: item.title, retrieval: 'hybrid-card' },
+                    score: Number(item.score ?? 0)
+                }))
+                    .filter((item) => item.score >= env.RAG_HARD_FLOOR)
+                    .filter((item) => isSnippetRelevantToQuery(input.query, item.content));
+                // 过滤后为空时继续走 chunk 检索，避免「Hybrid 有噪音命中 → 全被滤掉 → 直接空召回」。
+                if (hybridHits.length > 0)
+                    return hybridHits;
             }
             // 尚未编译知识卡片的旧知识库继续走 chunk 向量检索，方便存量文件逐步迁移。
             const kbIds = await this.getKnowledgeBaseIds();
@@ -84,17 +88,18 @@ export class RagService {
             const body = await response.json();
             return (body.results ?? [])
                 .filter((item) => Number(item.score ?? 0) >= env.RAG_HARD_FLOOR)
+                .filter((item) => isSnippetRelevantToQuery(input.query, item.content))
                 .map((item) => ({
-                    id: item.chunkId ?? item.id,
-                    content: item.content,
-                    metadata: {
-                        ...(item.metadata ?? {}),
-                        source: item.fileName,
-                        page: item.page,
-                        kbIds
-                    },
-                    score: Number(item.score ?? 0)
-                }));
+                id: item.chunkId ?? item.id,
+                content: item.content,
+                metadata: {
+                    ...(item.metadata ?? {}),
+                    source: item.fileName,
+                    page: item.page,
+                    kbIds
+                },
+                score: Number(item.score ?? 0)
+            }));
         }
         catch (error) {
             // RAG 不可用时安全降级为空结果，ReplyWorker 会生成转人工草稿，绝不能绕过知识库直接编答案。
@@ -102,4 +107,20 @@ export class RagService {
             return [];
         }
     }
+}
+
+/** API 侧二次相关性过滤：只拦明显错配（如套餐清单 vs 叠加规则），避免误杀正常 FAQ。 */
+function isSnippetRelevantToQuery(query, snippet) {
+    const q = String(query ?? '').replace(/\s+/g, '');
+    const raw = String(snippet ?? '').replace(/\s+/g, ' ');
+    if (!q || !raw)
+        return false;
+    const faqQ = raw.match(/(?:###\s*)?问[：:]\s*([^\n答]+)/u)?.[1]?.replace(/\s+/g, '') || '';
+    const answer = (raw.match(/答[：:]\s*([\s\S]+)/u)?.[1] || raw).replace(/\s+/g, '');
+    const corpus = `${faqQ}${answer}`;
+    if (/都有哪些|有哪些套餐|套餐有什么|哪些套餐|有什么套餐/.test(q)
+        && /叠加|核销一次|是否可以叠加/.test(corpus)
+        && !/(价目|报价|单价|套餐列表|包含项目|参考价)/.test(corpus))
+        return false;
+    return true;
 }

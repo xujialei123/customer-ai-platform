@@ -12,7 +12,10 @@ import { fileURLToPath } from 'node:url';
 import { config as loadDotEnv } from 'dotenv';
 const currentDir = fileURLToPath(new URL('.', import.meta.url));
 const projectRoot = resolve(currentDir, '../../../..');
-loadDotEnv({ path: resolve(projectRoot, '.env'), encoding: 'utf8' });
+// destin 编排固定使用仓库根目录，避免继承便携包冷启动留下的 CUSTOMER_AI_ROOT
+//（否则会误读 release/.../.env，例如 LLM_PROVIDER=openclaw）。
+process.env.CUSTOMER_AI_ROOT = projectRoot;
+loadDotEnv({ path: resolve(projectRoot, '.env'), encoding: 'utf8', override: true });
 const dockerDesktopPath = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
 const dockerBinPath = 'C:\\Program Files\\Docker\\Docker\\resources\\bin';
 const chromeCandidates = [

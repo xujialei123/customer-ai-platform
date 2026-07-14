@@ -139,7 +139,7 @@ export async function rpaRoutes(app) {
             duplicated: saved.duplicated,
             content: body.content
         });
-        return reply.send({ ok: true, duplicated: saved.duplicated });
+        return reply.send({ ok: true, duplicated: saved.duplicated, messageId: saved.message.id });
     });
     // 扩展观察到商家消息真正出现在页面后再入库，避免把“仅回填输入框”的草稿误认为已经发送。
     app.post('/rpa/outbound', async (request, reply) => {

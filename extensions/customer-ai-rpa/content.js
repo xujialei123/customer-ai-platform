@@ -111,6 +111,29 @@ function textOfDouyinBubble(element) {
   return String(main?.innerText || main?.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
+/** 去掉气泡前缀时间（如「11:36 新用户进线…」），避免切换会话时同一句系统提示因时间变化重复入队。 */
+function stripDouyinTimePrefix(content) {
+  return String(content || '')
+    .replace(/^\d{1,2}:\d{2}(?::\d{2})?\s+/, '')
+    .replace(/^(刚刚|刚才|今天|昨天|星期[一二三四五六日天])\s+/, '')
+    .trim();
+}
+
+/**
+ * 抖音来客工作台系统提示（非客户原话）。
+ * 切会话 / 未读角标回扫时常把这类气泡当成「新进线」，触发无意义 RAG/欢迎语。
+ */
+function isDouyinSystemNoticeContent(content) {
+  const text = stripDouyinTimePrefix(content);
+  if (!text)
+    return true;
+  return /新用户进线咨询/.test(text)
+    || /用户超时未回复/.test(text)
+    || /系统关闭会话|会话已结束|会话已关闭/.test(text)
+    || /对方已离开会话|客服已接入|已转接/.test(text)
+    || /^(系统消息|系统提示|平台通知)[:：]?/.test(text);
+}
+
 function createStableId(conversationId, direction, content, index, platform, element, occurrence = 1) {
   // 平台缺少 messageId 时才使用兜底 ID；数据库仍会做第二层去重。
   if (platform === 'douyin') {
@@ -406,8 +429,16 @@ function conversationMatchesTask(session, task, settings) {
   if (!task)
     return false;
   if (settings?.platform === 'meituan') {
+    // 侧栏常用 userId，聊天区埋点偶发延迟；同时兼容 conversationId / customerId / 昵称，避免误判已离开。
     const currentId = session.conversationId || session.customerId;
-    return Boolean(task.expectedConversationId) && task.expectedConversationId === currentId;
+    if (task.expectedConversationId && currentId && task.expectedConversationId === currentId)
+      return true;
+    if (task.expectedConversationId && session.customerId && task.expectedConversationId === session.customerId)
+      return true;
+    if (task.expectedCustomerName && session.customerName
+      && conversationIdsMatch(task.expectedCustomerName, session.customerName, settings, session))
+      return true;
+    return false;
   }
   if (conversationIdsMatch(task.expectedConversationId, session.conversationId, settings, session))
     return true;
@@ -1009,9 +1040,14 @@ function beginConversationSwitch(settings, item, hint, options = {}) {
   const expectedConversationId = settings.platform === 'meituan'
     ? (conversationIdOf(item, settings) || hint || '')
     : (conversationIdOf(item, settings) || hint || '');
+  const meituanName = settings.platform === 'meituan'
+    ? (item.querySelector('.userinfo-name-show, [class*="name"]')?.textContent?.trim() || '')
+    : '';
   conversationTask = {
     expectedConversationId,
-    expectedCustomerName: settings.platform === 'douyin' ? (conversationIdOf(item, settings) || hint || '') : undefined,
+    expectedCustomerName: settings.platform === 'douyin'
+      ? (conversationIdOf(item, settings) || hint || '')
+      : (meituanName || undefined),
     unreadCount: unreadCountOf(item, settings) || 1,
     phase: options.waitDraft ? 'waiting-draft' : 'switching',
     startedAt: Date.now()
@@ -1030,7 +1066,8 @@ function scheduleMeituanUnreadConversation(settings, targetDocument) {
   const unreadItem = findUnreadConversationItem(targetDocument, settings);
   if (!unreadItem)
     return false;
-  switchToConversation(settings, targetDocument, conversationIdOf(unreadItem, settings));
+  // 切过去即进入串行等待，避免「仅 switching」窗口被其它未读打断。
+  switchToConversation(settings, targetDocument, conversationIdOf(unreadItem, settings), { waitDraft: true });
   return true;
 }
 
@@ -1042,7 +1079,7 @@ function scheduleDouyinUnreadConversation(settings, targetDocument) {
     return false;
   if (shouldDeferSwitch(targetDocument, settings))
     return false;
-  switchToConversation(settings, targetDocument, conversationIdOf(switchItem, settings));
+  switchToConversation(settings, targetDocument, conversationIdOf(switchItem, settings), { waitDraft: true });
   return true;
 }
 
@@ -1084,33 +1121,48 @@ function findUnreadConversationItem(targetDocument, settings) {
 }
 
 function scheduleUnreadConversation(settings, targetDocument = document) {
-  // 调度器严格串行：当前草稿尚未回填时不切换，防止多个客户共用一个输入框造成串话。
+  // 调度器严格串行：当前草稿尚未回填/发送完成时，禁止因其他未读抢切，否则 AI 慢时会丢当前会话。
   if (!settings?.autoSwitchConversations)
     return;
-  if (settings.platform === 'douyin') {
-    const targetUrl = targetDocument.location?.href || location.href;
-    const centerName = getDouyinDomCustomerName(targetDocument, settings);
-    const chatReady = isDouyinChatReady(targetDocument, settings);
-    if (conversationTask?.phase === 'waiting-draft') {
-      if (!chatReady || isDouyinSystemSessionName(centerName) || shouldSwitchToUnread(targetDocument, settings))
-        clearConversationTask(!chatReady ? '聊天区未就绪，重新打开会话' : '目标会话仍未打开，重新切换');
-    }
-    // switching 卡住超过 4 秒且聊天区仍未就绪，强制释放后重点。
-    if (conversationTask?.phase === 'switching' && Date.now() - conversationTask.startedAt > 4000 && !chatReady)
-      clearConversationTask('切换超时，重新点击会话');
+  // Agnes/自定义 LLM 偶发 30s+；等草稿窗口要覆盖完整生成+推送，避免未完成就跳走。
+  const waitDraftTimeoutMs = 120000;
+  // 草稿正在强制切回话/回填时，其它未读一律排队。
+  if (conversationTask?.phase === 'applying-draft') {
+    setProcessingStatus(`草稿投递中：${conversationTask.expectedCustomerName || conversationTask.expectedConversationId || ''}`);
+    return;
   }
+  // 切会话后短暂读不到正确埋点属正常，绝不能因「ID 暂未对齐」就放锁去抢下一个未读。
   if (conversationTask?.phase === 'waiting-draft') {
-    // 美团等待草稿过久时释放锁，避免整页永久不切换。
-    if (settings.platform === 'meituan' && Date.now() - conversationTask.startedAt > 45000)
-      clearConversationTask('等待草稿超时，继续处理未读');
-    else
+    const waitedMs = Date.now() - (conversationTask.startedAt || 0);
+    if (waitedMs < waitDraftTimeoutMs) {
+      setProcessingStatus(`等待 AI 回复：${conversationTask.expectedCustomerName || conversationTask.expectedConversationId || ''}`);
       return;
+    }
+    clearConversationTask('等待草稿超时，继续处理其他未读');
   }
-  if (conversationTask?.phase === 'switching' && Date.now() - conversationTask.startedAt > 5000) {
+  if (conversationTask?.phase === 'switching') {
+    const waitedMs = Date.now() - (conversationTask.startedAt || 0);
     const targetUrl = targetDocument.location?.href || location.href;
     const session = readSession(targetDocument, settings, targetUrl);
-    if (!conversationMatchesTask(session, conversationTask, settings))
+    const landed = conversationMatchesTask(session, conversationTask, settings);
+    if (settings.platform === 'douyin') {
+      const chatReady = isDouyinChatReady(targetDocument, settings);
+      if (waitedMs > 4000 && !chatReady)
+        clearConversationTask('切换超时，重新点击会话');
+    }
+    if (conversationTask?.phase === 'switching' && waitedMs > 8000 && !landed)
       clearConversationTask('切换未完成，重新尝试');
+    else if (conversationTask?.phase === 'switching' && landed) {
+      // 已点进目标会话：升级为等草稿，其它未读继续排队。
+      conversationTask.phase = 'waiting-draft';
+      conversationTask.startedAt = Date.now();
+      setProcessingStatus(`等待 AI 回复：${conversationTask.expectedCustomerName || conversationTask.expectedConversationId || ''}`);
+      return;
+    }
+    else if (conversationTask?.phase === 'switching') {
+      setProcessingStatus(`正在切换会话：${conversationTask.expectedCustomerName || conversationTask.expectedConversationId || ''}`);
+      return;
+    }
   }
   if (conversationTask)
     return;
@@ -1162,7 +1214,10 @@ async function scanMessages() {
     const session = readSession(targetDocument, settings, targetUrl);
     const conversationId = session.conversationId;
     const customerId = session.customerId;
-    if (conversationTask && !conversationMatchesTask(session, conversationTask, settings) && Date.now() - conversationTask.startedAt > 5000)
+    // waiting/applying 期间允许短暂 ID 未对齐；只有 switching 卡住才按旧逻辑释放。
+    if (conversationTask?.phase === 'switching'
+      && !conversationMatchesTask(session, conversationTask, settings)
+      && Date.now() - conversationTask.startedAt > 8000)
       clearConversationTask('已释放过期会话切换任务');
     const messageItems = settings.platform === 'douyin'
       ? queryDouyinMessageItems(targetDocument, settings)
@@ -1214,34 +1269,57 @@ async function scanMessages() {
       }
       const contentOccurrence = new Map();
       workItems.forEach((item, index) => {
-        const content = settings.platform === 'douyin'
+        const rawContent = settings.platform === 'douyin'
           ? textOfDouyinBubble(item)
           : textOf(item, textSelector);
-        if (!content)
+        if (!rawContent)
           return;
         if (settings.platform === 'douyin' && (
-          content === '[暂不支持查看该类消息]'
-          || content.length <= 1
+          rawContent === '[暂不支持查看该类消息]'
+          || rawContent.length <= 1
         ))
+          return;
+        // 入库与去重用去时间前缀后的正文，避免「11:16 / 11:36 同一句系统提示」换 ID 再进线。
+        const content = settings.platform === 'douyin'
+          ? stripDouyinTimePrefix(rawContent)
+          : rawContent;
+        if (!content)
           return;
         const occurrence = (contentOccurrence.get(content) || 0) + 1;
         contentOccurrence.set(content, occurrence);
         // occurrence 对整页 items 计数；切片后 index 不代表全局位置，改用以 0 起的 work index。
         const id = createStableId(conversationId, direction, content, index, settings.platform, item, occurrence);
-        const contentKey = `${conversationId}:${direction}:${content}`;
+        const contentKey = settings.platform === 'douyin'
+          ? `${conversationId}:${direction}:${content}`
+          : null;
+        // 系统进线提示不是客户提问：只记 seen，切会话也不触发 RAG/欢迎语。
+        if (settings.platform === 'douyin' && direction === 'inbound' && isDouyinSystemNoticeContent(rawContent)) {
+          seenMessages.add(id);
+          submittedInboundIds.add(id);
+          if (contentKey)
+            submittedInboundContents.add(contentKey);
+          return;
+        }
         const isTriggerUnread = direction === 'inbound' && scheduledUnreadCount > 0 && index === workItems.length - 1;
         // 未读角标常在回复后残留；只有「同正文从未提交过」才允许强制重提，避免旧消息换 ID 后二次回复。
         const forceUnreadResubmit = isTriggerUnread
           && cardUnreadCount > 0
           && !submittedInboundIds.has(id)
-          && !submittedInboundContents.has(contentKey);
+          && !(contentKey && submittedInboundContents.has(contentKey));
         if (seenMessages.has(id) && !forceUnreadResubmit)
           return;
         if (direction === 'inbound' && settings.platform === 'douyin'
           && classifyDouyinInboundEvolution(conversationId, content) === 'skip') {
           seenMessages.add(id);
           submittedInboundIds.add(id);
-          submittedInboundContents.add(contentKey);
+          if (contentKey)
+            submittedInboundContents.add(contentKey);
+          return;
+        }
+        // 同正文已成功入过队（例如切回话前已恢复过），角标残留也不再二次入库。
+        if (settings.platform === 'douyin' && contentKey && submittedInboundContents.has(contentKey)
+          && !forceUnreadResubmit) {
+          seenMessages.add(id);
           return;
         }
         if (isInitialConversationScan && !isTriggerUnread) {
@@ -1252,7 +1330,8 @@ async function scanMessages() {
         if (direction === 'inbound') {
           inboundSent += 1;
           submittedInboundIds.add(id);
-          submittedInboundContents.add(contentKey);
+          if (contentKey)
+            submittedInboundContents.add(contentKey);
           if (settings.platform === 'douyin')
             lastDouyinInboundByConversation.set(conversationId, content);
           conversationTask = conversationTask || {
@@ -1322,33 +1401,8 @@ async function applyDraft(draft, expectedSession) {
       return;
     }
   }
-  let targetDocument = findSessionDocument(settings, expectedSession);
-  if ((!targetDocument || !isDouyinChatReady(targetDocument, settings)) && settings.platform === 'douyin') {
-    for (const candidate of getAccessibleDocuments()) {
-      const targetUrl = candidate.location?.href || location.href;
-      if (!globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(targetUrl))
-        continue;
-      if (switchToConversation(settings, candidate, expectedSession?.customerName || expectedSession?.conversationId, { waitDraft: true }))
-        break;
-    }
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      await sleep(600);
-      targetDocument = findSessionDocument(settings, expectedSession);
-      if (targetDocument && isDouyinChatReady(targetDocument, settings))
-        break;
-    }
-  }
-  if (!targetDocument && settings.platform === 'meituan') {
-    for (const candidate of getAccessibleDocuments()) {
-      const targetUrl = candidate.location?.href || location.href;
-      if (!globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(targetUrl))
-        continue;
-      if (switchToConversation(settings, candidate, expectedSession?.conversationId || expectedSession?.customerId, { waitDraft: true }))
-        break;
-    }
-    await sleep(700);
-    targetDocument = findSessionDocument(settings, expectedSession);
-  }
+  // 草稿就绪后：无论当前停在哪一通，都先强制切到该草稿对应会话再回填/发送。
+  const targetDocument = await ensureConversationForDraft(settings, expectedSession);
   if (!targetDocument) {
     setProcessingStatus(`切换失败，未找到目标会话：${expectedSession?.customerName || expectedSession?.conversationId || ''}`);
     void safeRuntimeMessage({
@@ -1375,9 +1429,8 @@ async function applyDraft(draft, expectedSession) {
     ? queryDouyinReplyInput(targetDocument, settings)
     : queryOneDeep(targetDocument, settings.replyInputSelector);
   if (!input && settings.platform === 'douyin') {
-    switchToConversation(settings, targetDocument, expectedSession?.customerName || expectedSession?.conversationId, { waitDraft: true });
-    for (let attempt = 0; attempt < 8 && !input; attempt += 1) {
-      await sleep(600);
+    for (let attempt = 0; attempt < 6 && !input; attempt += 1) {
+      await sleep(500);
       input = queryDouyinReplyInput(targetDocument, settings);
     }
   }
@@ -1404,16 +1457,6 @@ async function applyDraft(draft, expectedSession) {
     return;
   }
   const canAutoSend = settings.autoSend && draft.allowAutoSend && draft.riskLevel === 'low' && settings.sendButtonSelector;
-  if (settings.autoSwitchConversations && settings.autoSend && draft.riskLevel !== 'low') {
-    // 全自动队列只跳过中高风险草稿；低风险草稿即使未通过发送冷却，也要先回填给客服确认。
-    if (conversationTask && conversationMatchesTask(expectedSession, conversationTask, settings)) {
-      clearTimeout(schedulerTimer);
-      conversationTask = null;
-      setProcessingStatus('已转人工，继续等待新消息');
-      setTimeout(scanMessages, 500);
-    }
-    return;
-  }
   dispatchEditableInput(input, draft.content);
   if (settings.platform === 'douyin')
     await waitForDouyinSendReady(targetDocument, settings, input, 3500);
@@ -1443,13 +1486,12 @@ async function applyDraft(draft, expectedSession) {
     });
     releaseConversationTaskAfterDraft(expectedSession, settings, clicked ? 1500 : 600);
   } else {
-    // 低风险但暂未满足自动点击条件时，保留在输入框，便于现场人工确认和排查发送冷却/服务端开关。
     const skipReason = !settings.autoSend
       ? '弹窗未勾选自动发送'
       : draft.allowAutoSend !== true
         ? `服务端未授权自动发送${draft.denyReason ? `（${draft.denyReason}）` : ''}`
         : draft.riskLevel !== 'low'
-          ? `风险等级 ${draft.riskLevel}，仅 low 可自动发送`
+          ? `风险等级 ${draft.riskLevel}，仅回填不自动发送`
           : !settings.sendButtonSelector
             ? '发送按钮选择器为空'
             : '条件未满足';
@@ -1474,6 +1516,64 @@ async function applyDraft(draft, expectedSession) {
     });
     releaseConversationTaskAfterDraft(expectedSession, settings, 600);
   }
+}
+
+/** 草稿到位：锁定 applying-draft，强制切到 draft.session 对应会话后再返回文档。 */
+async function ensureConversationForDraft(settings, expectedSession) {
+  const hint = expectedSession?.customerName
+    || expectedSession?.conversationId
+    || expectedSession?.customerId
+    || '';
+  conversationTask = {
+    expectedConversationId: expectedSession?.conversationId || expectedSession?.customerId || hint,
+    expectedCustomerName: expectedSession?.customerName || hint || undefined,
+    unreadCount: conversationTask?.unreadCount || 1,
+    phase: 'applying-draft',
+    startedAt: Date.now()
+  };
+  setProcessingStatus(`草稿已就绪，切换会话：${expectedSession?.customerName || expectedSession?.conversationId || ''}`);
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    let targetDocument = findSessionDocument(settings, expectedSession);
+    if (targetDocument) {
+      if (settings.platform === 'douyin' && !isDouyinChatReady(targetDocument, settings)) {
+        switchToConversation(settings, targetDocument, hint, { waitDraft: true });
+        conversationTask.phase = 'applying-draft';
+        await sleep(550);
+        continue;
+      }
+      const input = settings.platform === 'douyin'
+        ? queryDouyinReplyInput(targetDocument, settings)
+        : queryOneDeep(targetDocument, settings.replyInputSelector);
+      if (input || attempt >= 4)
+        return targetDocument;
+    }
+    for (const candidate of getAccessibleDocuments()) {
+      const targetUrl = candidate.location?.href || location.href;
+      if (!globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(targetUrl))
+        continue;
+      const candidateSettings = settings.platform
+        ? settings
+        : await resolveSettings(targetUrl);
+      if (candidateSettings?.platform && expectedSession?.platform
+        && candidateSettings.platform !== expectedSession.platform)
+        continue;
+      const switched = switchToConversation(
+        candidateSettings || settings,
+        candidate,
+        hint || expectedSession?.conversationId || expectedSession?.customerId,
+        { waitDraft: true }
+      );
+      if (switched) {
+        conversationTask.phase = 'applying-draft';
+        conversationTask.expectedConversationId = expectedSession?.conversationId || expectedSession?.customerId || hint;
+        conversationTask.expectedCustomerName = expectedSession?.customerName || hint || undefined;
+        break;
+      }
+    }
+    await sleep(550);
+  }
+  return findSessionDocument(settings, expectedSession);
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

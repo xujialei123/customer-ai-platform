@@ -20,7 +20,8 @@ export class MessageService {
             return { conversation, message: existed, duplicated: true };
         }
         // 内容短时去重：扩展 ID 抖动时，同一会话同一正文会带着新 id 反复入库。
-        // 若近 10 分钟内已有同正文入站，且仍在处理中或已有草稿，则视为重复，不再入队。
+        // 若近窗口内「同一条已处理中/刚发出」的同正文回扫，则视为重复，不再入队。
+        // 客户继续咨询（哪怕措辞相近或过一会儿再问同一句）不得因软去重被丢掉。
         const softDuplicate = await this.findSoftDuplicateInbound(conversation.id, message.content);
         if (softDuplicate)
             return { conversation, message: softDuplicate, duplicated: true };
@@ -53,8 +54,9 @@ export class MessageService {
         return { conversation, message: saved, duplicated: false };
     }
     /**
-     * 查找「同会话同正文」的近期入站，用于抵消扩展 messageId 不稳定造成的假新消息。
-     * 客户短时间真心连发同一句（如两次你好）仍允许：仅在已有草稿/仍在处理窗口时拦截。
+     * 抵消扩展 messageId 抖动造成的假「新消息」，不是业务层「客户不能重复提问」。
+     * 判定关键看「这条是否已在处理/刚发出」：客户过一会儿再问同一句（继续咨询）必须放行。
+     * 禁止用前缀相似（门店/门店在哪里、在吗/在吗在吗）拦后续问题。
      */
     async findSoftDuplicateInbound(conversationId, content, withinMs = 10 * 60 * 1000) {
         const normalized = String(content ?? '').trim();
@@ -69,18 +71,8 @@ export class MessageService {
             orderBy: { createdAt: 'desc' },
             take: 20
         });
-        // 精确同文，或流式残文/加长句（「你」↔「你好」）都视为同一条入站抖动。
-        const recent = recentMessages.find((item) => {
-            const previous = String(item.content ?? '').trim();
-            if (!previous)
-                return false;
-            if (previous === normalized)
-                return true;
-            if (normalized.length <= 40 && previous.length <= 200
-                && (normalized.startsWith(previous) || previous.startsWith(normalized)))
-                return true;
-            return false;
-        });
+        // 只认「正文完全一致」的回扫；相似问法不算重复。
+        const recent = recentMessages.find((item) => String(item.content ?? '').trim() === normalized);
         if (!recent)
             return null;
         const draft = await prisma.replyDraft.findFirst({
@@ -91,16 +83,20 @@ export class MessageService {
             orderBy: { createdAt: 'desc' }
         });
         const ageMs = Date.now() - new Date(recent.createdAt).getTime();
-        if (draft?.status === 'sent') {
-            // 已完整回复后，允许顾客稍后再发同一句；仅拦截发送后短窗口内的 ID 抖动重提。
+        if (draft?.status === 'sent' || draft?.status === 'dispatching') {
+            // 刚发出/正在点发送：短窗口内同文多半是页面回扫气泡，不是客户再问一次。
             if (ageMs >= 0 && ageMs < 90 * 1000)
                 return recent;
             return null;
         }
-        if (draft)
-            return recent;
-        // 草稿尚未写出（RAG/OpenClaw 仍在跑）时也拦截，避免并发双开 Worker。
-        if (ageMs >= 0 && ageMs < 5 * 60 * 1000)
+        if (draft && ['pending', 'approved'].includes(draft.status)) {
+            // 草稿还在等插件：防双开 Worker；若超过 3 分钟仍未发出，放行让客户再触发一轮。
+            if (ageMs >= 0 && ageMs < 3 * 60 * 1000)
+                return recent;
+            return null;
+        }
+        // 草稿尚未写出（RAG/LLM 仍在跑）：短窗口防并发双入队。
+        if (ageMs >= 0 && ageMs < 2 * 60 * 1000)
             return recent;
         return null;
     }
@@ -151,32 +147,61 @@ export class MessageService {
         const parsed = new Date(value);
         return Number.isNaN(parsed.getTime()) ? undefined : parsed;
     }
-    async getRecentHistory(conversationId, limit = 12, excludeMessageId) {
-        // 当前问题会单独传给模型，因此从历史中排除，避免同一句重复出现造成模型误判。
-        const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } });
+    /**
+     * 取近期多轮上下文给 LLM。
+     * 抖音/美团默认只落 ReplyDraft、不写 outbound，若不把待发草稿并入历史，模型只会看到客户单边话，像「没有记忆」。
+     * 会话摘要由 Worker 单独传入 generateReply，避免 slice 历史时把摘要砍掉。
+     */
+    async getRecentHistory(conversationId, limit = 16, excludeMessageId) {
         const messages = await prisma.message.findMany({
             where: { conversationId, ...(excludeMessageId ? { id: { not: excludeMessageId } } : {}) },
             orderBy: { createdAt: 'desc' },
             take: limit
         });
-        const history = messages.reverse().map((item) => ({
-            role: item.direction === 'outbound' ? 'assistant' : 'user',
-            content: item.content ?? ''
-        }));
-        if (conversation?.summary) {
-            history.unshift({ role: 'system', content: `较早会话摘要：\n${conversation.summary}` });
+        const chronological = messages.reverse();
+        const inboundIds = chronological
+            .filter((item) => item.direction === 'inbound')
+            .map((item) => item.id);
+        const draftByMessageId = new Map();
+        if (inboundIds.length > 0) {
+            // 仅并入尚未真正发出的草稿；已 sent 的应以 outbound 消息为准，避免双份 assistant。
+            const drafts = await prisma.replyDraft.findMany({
+                where: {
+                    conversationId,
+                    messageId: { in: inboundIds },
+                    status: { in: ['pending', 'approved'] }
+                },
+                orderBy: { createdAt: 'asc' }
+            });
+            for (const draft of drafts) {
+                if (draft.messageId && draft.content)
+                    draftByMessageId.set(draft.messageId, draft.content);
+            }
+        }
+        const history = [];
+        for (const item of chronological) {
+            if (item.direction === 'inbound') {
+                history.push({ role: 'user', content: item.content ?? '' });
+                const draftContent = draftByMessageId.get(item.id);
+                if (draftContent)
+                    history.push({ role: 'assistant', content: draftContent });
+            }
+            else {
+                history.push({ role: 'assistant', content: item.content ?? '' });
+            }
         }
         return history;
     }
     async refreshConversationSummary(conversationId) {
         // 较早历史压缩到数据库摘要，服务重启后仍可恢复；摘要不缓存实时订单状态。
         const total = await prisma.message.count({ where: { conversationId } });
-        if (total <= 12)
+        // 与 getRecentHistory 窗口对齐：超过近期条数才压缩更早对话。
+        if (total <= 16)
             return;
         const olderMessages = await prisma.message.findMany({
             where: { conversationId },
             orderBy: { createdAt: 'desc' },
-            skip: 12,
+            skip: 16,
             take: 24
         });
         // 摘要直接压缩数据库中的真实历史，不让模型改写事实；订单实时状态仍由订单 Adapter 每次重新查询。

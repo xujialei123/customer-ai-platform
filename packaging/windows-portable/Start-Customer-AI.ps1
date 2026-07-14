@@ -1,14 +1,14 @@
 # @file packaging/windows-portable/Start-Customer-AI.ps1
 # @module 数据库、共享包与交付
 # @description 便携环境检查与一键启动全部服务（路径与 Docker 均按通用规则发现，不写死本机盘符）。
-# @see 联动关注：Docker/OpenClaw/RAG/API/扩展状态页。
+# @see 联动关注：Docker/便携 Node/RAG/API/扩展状态页。
 #Requires -Version 5.1
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path -LiteralPath (Split-Path -Parent $MyInvocation.MyCommand.Path)).Path
-$NodeExe = Join-Path $Root 'openclaw\app\runtime\node-win-x64\node.exe'
+$NodeExe = Join-Path $Root 'runtime\node-win-x64\node.exe'
 $PidDir = Join-Path $Root 'data\.pids'
 $LogDir = Join-Path $Root 'data\logs'
 $PostgresContainer = 'customer-ai-postgres'
@@ -299,7 +299,7 @@ function Test-NeedsLocalOpenClaw {
 
 function Ensure-OpenClawGateway {
   if (-not (Test-NeedsLocalOpenClaw)) {
-    Write-Host 'LLM: direct provider configured; skipping local OpenClaw gateway.' -ForegroundColor DarkGray
+    Write-Host 'LLM: direct provider configured; OpenClaw not required.' -ForegroundColor DarkGray
     return
   }
 
@@ -309,6 +309,7 @@ function Ensure-OpenClawGateway {
     return
   }
 
+  # 交付包不再捆绑 openclaw/；若仍配置 LLM_PROVIDER=openclaw，只等待客户自备网关。
   $startScript = Join-Path $Root 'openclaw\Start-OpenClaw.ps1'
   if (Test-Path -LiteralPath $startScript) {
     Write-Host 'OpenClaw: trying to start automatically...' -ForegroundColor Yellow
@@ -319,16 +320,10 @@ function Ensure-OpenClawGateway {
   }
 
   Show-OpenClawManualHint
-  Write-Host 'Waiting for OpenClaw gateway (up to 5 minutes)...' -ForegroundColor Yellow
-  if (Wait-Http $gatewayUrl 300) { return }
-
   throw (@(
-    'OpenClaw gateway is still not reachable on port 18789.',
-    '',
-    "Manual start: $startScript",
-    'Logs: openclaw\data\logs',
-    'Or set LLM_PROVIDER=agnes and configure AGNES_API_KEY to skip OpenClaw.',
-    'Then run Start-Customer-AI.bat again if needed.'
+    'This portable package does not include OpenClaw.',
+    'Set LLM_PROVIDER=agnes (or custom) in .env / guide page, or start your own OpenClaw on 18789,',
+    'then run Start-Customer-AI.bat again.'
   ) -join [Environment]::NewLine)
 }
 
