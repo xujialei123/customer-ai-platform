@@ -183,13 +183,18 @@ Write-Host '5/6 Generating secret-free config...' -ForegroundColor Cyan
 $envText = [IO.File]::ReadAllText((Join-Path $Root '.env.example'), [Text.Encoding]::UTF8)
 $values = [ordered]@{
   NODE_ENV = 'production'
-  LLM_PROVIDER = 'openclaw'
+  # 默认直连 Agnes；仅当客户显式设 LLM_PROVIDER=openclaw 时才启本机网关。
+  LLM_PROVIDER = (Resolve-PackagedEnvValue 'LLM_PROVIDER' 'agnes')
+  AGNES_API_URL = (Resolve-PackagedEnvValue 'AGNES_API_URL' 'https://apihub.agnes-ai.com/v1/chat/completions')
+  # 对外安全打包不带入本机模型 Key；客户到现场自行填写。
+  AGNES_API_KEY = $(if ($SafeSendDefaults) { '' } else { Resolve-PackagedEnvValue 'AGNES_API_KEY' '' })
+  AGNES_MODEL = (Resolve-PackagedEnvValue 'AGNES_MODEL' 'agnes-2.0-flash')
   OPENCLAW_GATEWAY_URL = 'http://127.0.0.1:18789'
   OPENCLAW_TOKEN = ''
   # Leave portable OpenClaw paths empty; runtime auto-discovers .\openclaw relative to package root.
   OPENCLAW_PORTABLE_ROOT = ''
   OPENCLAW_TOKEN_FILE = ''
-  OPENCLAW_AUTO_START = 'true'
+  OPENCLAW_AUTO_START = 'false'
   OPENCLAW_TIMEOUT_MS = '30000'
   ORDER_ADAPTER_MODE = 'mock'
   RPA_MOCK_MODE = 'extension'
@@ -202,7 +207,8 @@ $values = [ordered]@{
 }
 foreach ($optionalKey in @(
   'EMBEDDING_BASE_URL', 'EMBEDDING_API_KEY', 'EMBEDDING_MODEL', 'EMBEDDING_DIM',
-  'LLM_API_KEY', 'LLM_MODEL', 'RAG_API_KEY'
+  'LLM_BASE_URL', 'LLM_API_KEY', 'LLM_MODEL', 'RAG_API_KEY',
+  'AGENES_API_URL', 'AGENES_API_KEY'
 )) {
   $fromDev = Get-RootEnvValue $optionalKey
   if ($null -ne $fromDev -and $fromDev -ne '') { $values[$optionalKey] = $fromDev }

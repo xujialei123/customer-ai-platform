@@ -50,18 +50,37 @@ export async function guideRoutes(app) {
     app.get('/guide/status', async () => {
         await refreshRpaAllowlistCache().catch(() => undefined);
         const allowlist = buildRpaAllowlistStatus();
+        const llmConfigured = Boolean(env.LLM_CHAT_API_KEY && env.LLM_CHAT_URL)
+            && !['replace-me', 'your_openclaw_token', 'your_llm_key', 'your_agenes_key', 'your_agnes_key']
+                .includes(String(env.LLM_CHAT_API_KEY));
+        const llm = {
+            ok: llmConfigured,
+            configured: llmConfigured,
+            provider: env.LLM_PROVIDER,
+            model: env.LLM_CHAT_MODEL,
+            requiresLocalGateway: Boolean(env.LLM_REQUIRES_LOCAL_GATEWAY),
+            chatUrl: env.LLM_REQUIRES_LOCAL_GATEWAY ? env.OPENCLAW_GATEWAY_URL : '(direct)'
+        };
         const [openclaw, rag, extension, handoff] = await Promise.all([
-            fetch(env.OPENCLAW_GATEWAY_URL, { signal: AbortSignal.timeout(2000) })
-                .then((response) => ({
-                    ok: response.status >= 200 && response.status < 500,
-                    configured: Boolean(env.OPENCLAW_TOKEN),
-                    gatewayUrl: env.OPENCLAW_GATEWAY_URL
-                }))
-                .catch(() => ({
-                    ok: false,
-                    configured: Boolean(env.OPENCLAW_TOKEN),
-                    gatewayUrl: env.OPENCLAW_GATEWAY_URL
-                })),
+            env.LLM_REQUIRES_LOCAL_GATEWAY
+                ? fetch(env.OPENCLAW_GATEWAY_URL, { signal: AbortSignal.timeout(2000) })
+                    .then((response) => ({
+                        ok: response.status >= 200 && response.status < 500,
+                        configured: Boolean(env.OPENCLAW_TOKEN),
+                        gatewayUrl: env.OPENCLAW_GATEWAY_URL
+                    }))
+                    .catch(() => ({
+                        ok: false,
+                        configured: Boolean(env.OPENCLAW_TOKEN),
+                        gatewayUrl: env.OPENCLAW_GATEWAY_URL
+                    }))
+                // 直连模式下引导页把 LLM 状态映射到原 openclaw 灯，避免旧前端显示红灯。
+                : Promise.resolve({
+                    ok: llmConfigured,
+                    configured: llmConfigured,
+                    gatewayUrl: env.LLM_CHAT_URL,
+                    provider: env.LLM_PROVIDER
+                }),
             fetchJson(`${env.RAG_SERVICE_URL.replace(/\/$/, '')}/health`).catch(() => ({ ok: false })),
             fetchJson(`http://127.0.0.1:${env.API_PORT}/rpa/extension/status`).catch(() => ({
                 connectedClients: 0,
@@ -73,6 +92,7 @@ export async function guideRoutes(app) {
         return {
             ok: true,
             api: { ok: true },
+            llm,
             openclaw,
             rag,
             extension,
@@ -80,6 +100,8 @@ export async function guideRoutes(app) {
             config: {
                 autoReplyEnabled: env.AUTO_REPLY_ENABLED,
                 rpaAutoSendEnabled: env.RPA_AUTO_SEND_ENABLED,
+                llmProvider: env.LLM_PROVIDER,
+                llmModel: env.LLM_CHAT_MODEL,
                 meituanRpaMode: process.env.MEITUAN_RPA_MODE ?? 'extension',
                 meituanAllowedCustomers: allowlist.meituanAllowedCustomers,
                 meituanAllowlistEnabled: allowlist.meituanAllowlistEnabled,

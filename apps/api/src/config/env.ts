@@ -38,7 +38,18 @@ const envSchema = z.object({
     API_PORT: z.coerce.number().default(3001),
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1),
-    OPENCLAW_GATEWAY_URL: z.string().min(1),
+    // LLM：默认直连 Agnes / OpenAI 兼容接口；openclaw 仅作可选本机网关。
+    LLM_PROVIDER: z.enum(['agnes', 'agenes', 'openai-compatible', 'openclaw']).default('agnes'),
+    LLM_BASE_URL: z.string().optional().default(''),
+    LLM_API_KEY: z.string().optional().default(''),
+    LLM_MODEL: z.string().optional().default(''),
+    // Agnes 官方拼写；兼容历史 .env.example 里的 AGENES_*。
+    AGNES_API_URL: z.string().optional().default(''),
+    AGNES_API_KEY: z.string().optional().default(''),
+    AGNES_MODEL: z.string().optional().default('agnes-2.0-flash'),
+    AGENES_API_URL: z.string().optional().default(''),
+    AGENES_API_KEY: z.string().optional().default(''),
+    OPENCLAW_GATEWAY_URL: z.string().optional().default('http://127.0.0.1:18789'),
     OPENCLAW_TOKEN: z.string().optional().default(''),
     OPENCLAW_PORTABLE_ROOT: z.string().optional().default(''),
     OPENCLAW_TOKEN_FILE: z.string().optional().default(''),
@@ -122,9 +133,67 @@ function resolveOpenClawToken(tokenFile) {
 
 const openClawPortableRoot = resolveOpenClawPortableRoot();
 const openClawTokenFile = resolveOpenClawTokenFile(openClawPortableRoot);
+const openClawToken = resolveOpenClawToken(openClawTokenFile);
+
+/**
+ * 解析实际 chat completions 调用目标。
+ * agnes：直连 Agnes；openai-compatible：直连 LLM_BASE_URL；openclaw：本机网关（可选）。
+ */
+function resolveLlmTarget() {
+    const providerRaw = String(parsedEnv.LLM_PROVIDER || 'agnes').toLowerCase();
+    const provider = providerRaw === 'agenes' ? 'agnes' : providerRaw;
+    const agnesKey = String(parsedEnv.AGNES_API_KEY || parsedEnv.AGENES_API_KEY || '').trim();
+    const agnesUrl = String(parsedEnv.AGNES_API_URL || parsedEnv.AGENES_API_URL || '').trim();
+    const agnesModel = String(parsedEnv.AGNES_MODEL || parsedEnv.LLM_MODEL || 'agnes-2.0-flash').trim();
+    const llmKey = String(parsedEnv.LLM_API_KEY || '').trim();
+    const llmBase = String(parsedEnv.LLM_BASE_URL || '').trim().replace(/\/$/, '');
+    const llmModel = String(parsedEnv.LLM_MODEL || '').trim();
+
+    if (provider === 'agnes') {
+        const url = agnesUrl
+            || (llmBase ? (llmBase.endsWith('/chat/completions') ? llmBase : `${llmBase}/chat/completions`) : '');
+        return {
+            provider: 'agnes',
+            url,
+            apiKey: agnesKey || llmKey,
+            model: agnesModel || 'agnes-2.0-flash',
+            requiresLocalGateway: false
+        };
+    }
+    if (provider === 'openai-compatible') {
+        const url = llmBase.endsWith('/chat/completions')
+            ? llmBase
+            : `${llmBase}/chat/completions`;
+        return {
+            provider: 'openai-compatible',
+            url,
+            apiKey: llmKey || agnesKey,
+            model: llmModel || agnesModel || 'gpt-4.1-mini',
+            requiresLocalGateway: false
+        };
+    }
+    // openclaw：继续走本机网关。
+    const endpoint = String(parsedEnv.OPENCLAW_CHAT_ENDPOINT || '/v1/chat/completions')
+        .replace('{agentId}', parsedEnv.OPENCLAW_AGENT_ID || 'main');
+    const gateway = String(parsedEnv.OPENCLAW_GATEWAY_URL || 'http://127.0.0.1:18789').replace(/\/$/, '');
+    return {
+        provider: 'openclaw',
+        url: `${gateway}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`,
+        apiKey: openClawToken,
+        model: String(parsedEnv.OPENCLAW_MODEL || llmModel || 'openclaw/default'),
+        requiresLocalGateway: true
+    };
+}
+
+const llmTarget = resolveLlmTarget();
 export const env = {
     ...parsedEnv,
+    LLM_PROVIDER: llmTarget.provider,
     OPENCLAW_PORTABLE_ROOT: openClawPortableRoot,
     OPENCLAW_TOKEN_FILE: openClawTokenFile,
-    OPENCLAW_TOKEN: resolveOpenClawToken(openClawTokenFile)
+    OPENCLAW_TOKEN: openClawToken,
+    LLM_CHAT_URL: llmTarget.url,
+    LLM_CHAT_API_KEY: llmTarget.apiKey,
+    LLM_CHAT_MODEL: llmTarget.model,
+    LLM_REQUIRES_LOCAL_GATEWAY: llmTarget.requiresLocalGateway
 };

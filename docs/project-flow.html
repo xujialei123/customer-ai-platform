@@ -74,7 +74,7 @@
     <main>
       <section id="position">
         <h2>一、项目定位</h2>
-        <p class="lead">统一接入企业微信、美团到店和抖音来客消息，通过知识库检索、OpenClaw 话术生成和风险控制，输出自动回复或人工审核草稿。平台接入必须经过 Adapter，不允许 OpenClaw 直接操作平台。</p>
+        <p class="lead">统一接入企业微信、美团到店和抖音来客消息，通过知识库检索、直连大模型（默认 Agnes）组织话术和风险控制，输出自动回复或人工审核草稿。平台接入必须经过 Adapter；LLM 只负责话术，不允许直接操作平台。本机 OpenClaw 网关仅在 <code>LLM_PROVIDER=openclaw</code> 时可选启用。</p>
         <div class="grid" style="margin-top:16px">
           <div class="card"><span class="tag green">官方接口</span><h3>企业微信</h3><p>使用官方 Webhook/API 接收和发送消息，默认关闭自动发送。</p></div>
           <div class="card"><span class="tag amber">RPA Adapter</span><h3>美团到店</h3><p>Chrome 扩展监听已登录页面 DOM，通过本地 WebSocket 与 API 通信。</p></div>
@@ -89,7 +89,8 @@
           <tr><td>API</td><td><code>3001</code></td><td>消息接入、Adapter、BullMQ、ReplyDraft、Chrome WebSocket 网关</td></tr>
           <tr><td>RPA Mock</td><td><code>3100</code></td><td>模拟美团/抖音多客户会话、未读角标和页面发送动作</td></tr>
           <tr><td>RAG Service</td><td><code>8787</code></td><td>上传解析、Wiki、Knowledge Card、Hybrid Retrieval、Graph、Gap</td></tr>
-          <tr><td>OpenClaw</td><td><code>18789</code></td><td>根据检索证据组织自然客服话术，不直接连接平台</td></tr>
+          <tr><td>LLM（默认 Agnes）</td><td>远程 HTTPS</td><td>根据检索证据直连 chat completions 组织话术；密钥用 <code>AGNES_API_KEY</code></td></tr>
+          <tr><td>OpenClaw（可选）</td><td><code>18789</code></td><td>仅 <code>LLM_PROVIDER=openclaw</code> 时需要本机网关</td></tr>
           <tr><td>PostgreSQL</td><td><code>5433</code></td><td>业务消息、草稿、知识元数据和 pgvector 向量</td></tr>
           <tr><td>Redis</td><td><code>6379</code></td><td>BullMQ 异步回复任务与任务状态</td></tr>
         </tbody></table>
@@ -107,7 +108,7 @@
 
       <section id="message">
         <h2>四、消息回复主链路</h2>
-        <div class="flow"><div class="step">Webhook / DOM<small>平台原始消息</small></div><div class="arrow">→</div><div class="step">Platform Adapter<small>转换 UnifiedMessage</small></div><div class="arrow">→</div><div class="step">MessageService<small>去重并入库</small></div><div class="arrow">→</div><div class="step">BullMQ<small>异步 ReplyWorker</small></div><div class="arrow">→</div><div class="step">Hybrid RAG<small>检索知识证据</small></div><div class="arrow">→</div><div class="step">OpenClaw<small>组织客服话术</small></div><div class="arrow">→</div><div class="step">SafetyService<small>自动发送或转人工</small></div></div>
+        <div class="flow"><div class="step">Webhook / DOM<small>平台原始消息</small></div><div class="arrow">→</div><div class="step">Platform Adapter<small>转换 UnifiedMessage</small></div><div class="arrow">→</div><div class="step">MessageService<small>去重并入库</small></div><div class="arrow">→</div><div class="step">BullMQ<small>异步 ReplyWorker</small></div><div class="arrow">→</div><div class="step">Hybrid RAG<small>检索知识证据</small></div><div class="arrow">→</div><div class="step">LLM 直连<small>Agnes / OpenAI 兼容</small></div><div class="arrow">→</div><div class="step">SafetyService<small>自动发送或转人工</small></div></div>
       </section>
 
       <section id="retrieval">
@@ -133,14 +134,14 @@
         <div class="grid two">
           <div class="card"><h3>会话隔离键</h3><p><code>platform + shopId + conversationId + customerId</code>。不能使用昵称或页面标题作为生产会话标识。</p></div>
           <div class="card"><h3>消息与草稿</h3><p>平台 messageId 做第一层去重；同会话同正文在处理中或刚发送后会短时内容去重，抵消抖音虚拟列表 ID 抖动。自动模式只推送 <code>expectedMessageIds</code> 匹配的草稿，禁止回放历史 pending。</p></div>
-          <div class="card"><h3>历史上下文</h3><p>近期消息直接提供给 OpenClaw，较早消息写入数据库摘要；订单实时状态不进入长期摘要。</p></div>
+          <div class="card"><h3>历史上下文</h3><p>近期消息直接提供给 LLM，较早消息写入数据库摘要；订单实时状态不进入长期摘要。</p></div>
           <div class="card"><h3>发送确认</h3><p>只有商家消息真实出现在页面 DOM 后才记录 outbound，并关闭相同会话、相同内容的待发送草稿。</p></div>
         </div>
       </section>
 
       <section id="orders">
         <h2>八、公司订单查询</h2>
-        <div class="flow"><div class="step">订单意图<small>订单号或手机号</small></div><div class="arrow">→</div><div class="step">Order Adapter<small>白名单只读调用</small></div><div class="arrow">→</div><div class="step">脱敏结果<small>不暴露鉴权和隐私</small></div><div class="arrow">→</div><div class="step">OpenClaw<small>结合真实结果回复</small></div></div>
+        <div class="flow"><div class="step">订单意图<small>订单号或手机号</small></div><div class="arrow">→</div><div class="step">Order Adapter<small>白名单只读调用</small></div><div class="arrow">→</div><div class="step">脱敏结果<small>不暴露鉴权和隐私</small></div><div class="arrow">→</div><div class="step">LLM 直连<small>结合真实结果回复</small></div></div>
         <div class="notice">订单路由优先于知识库：当前句包含查单意图，或最近客服正在等待订单号/手机号时，纯订单号会直接进入 Order Adapter，完全跳过 Hybrid RAG。只有非订单消息才执行知识库检索。</div>
         <p>接口超时、鉴权失败、缺少订单号或查不到数据时必须转人工。未知企业接口继续保留 Adapter/TODO，不得编造官方接口。</p>
       </section>
@@ -174,20 +175,20 @@
 
       <section id="operation">
         <h2>十二、日常操作顺序</h2>
-        <ol><li>执行 <code>pnpm dev</code> 并确认 Docker、OpenClaw、3001、3100、8787 正常。</li><li>打开 <code>http://127.0.0.1:8787/kb-admin</code> 上传并解析文件。</li><li>点击文件“编译”，审核 Wiki 和 Knowledge Cards。</li><li>按需设置卡片平台、门店、分类、关键词和优先级。</li><li>在 <code>chrome://extensions</code> 重新加载修改后的插件。</li><li>开启页面监听和自动处理未读；确认安全后再单独开启自动发送。</li></ol>
+        <ol><li>执行 <code>pnpm dev</code> 并确认 Docker、LLM 配置（Agnes Key）、3001、3100、8787 正常；无需本机 OpenClaw。</li><li>打开 <code>http://127.0.0.1:8787/kb-admin</code> 上传并解析文件。</li><li>点击文件“编译”，审核 Wiki 和 Knowledge Cards。</li><li>按需设置卡片平台、门店、分类、关键词和优先级。</li><li>在 <code>chrome://extensions</code> 重新加载修改后的插件。</li><li>开启页面监听和自动处理未读；确认安全后再单独开启自动发送。</li></ol>
         <div class="grid two" style="margin-top:16px">
-          <div class="card"><h3>开发启动</h3><p><code>pnpm dev</code> 会启动 API、RAG、Mock 页面，并按扩展模式等待 Chrome 插件连接。只有设置 <code>RPA_MOCK_MODE=playwright</code> 时才使用旧 Playwright watcher。</p></div>
-          <div class="card"><h3>Windows 便携交付</h3><p><code>pnpm package:windows</code> 会生成一体化目录包。客户双击 <code>Start-Customer-AI.bat</code> 后自动启动 Docker、OpenClaw、RAG 和 API，并打开 <code>http://127.0.0.1:3001/guide</code> 配置引导页。OpenClaw 固定在包内 <code>openclaw/</code>，无需在 <code>.env</code> 填写便携路径。</p></div>
+          <div class="card"><h3>开发启动</h3><p><code>pnpm dev</code> 会启动 API、RAG、Mock 页面，并按扩展模式等待 Chrome 插件连接。默认 <code>LLM_PROVIDER=agnes</code> 时跳过 OpenClaw。只有设置 <code>RPA_MOCK_MODE=playwright</code> 时才使用旧 Playwright watcher。</p></div>
+          <div class="card"><h3>Windows 便携交付</h3><p><code>pnpm package:windows</code> 会生成一体化目录包。客户双击 <code>Start-Customer-AI.bat</code> 后自动启动 Docker、RAG 和 API（默认直连 Agnes，不启动 OpenClaw），并打开 <code>http://127.0.0.1:3001/guide</code>。在 <code>.env</code> 填写 <code>AGNES_API_KEY</code> 即可。</p></div>
           <div class="card"><h3>完整部署手册</h3><p>开发、便携交付、生产基线、灰度上线、验收、回滚和备份步骤见 <a href="deployment-guide.html">部署与上线手册</a>。</p></div>
-          <div class="card"><h3>首次客户配置</h3><p>客服电脑仍需安装 Docker Desktop 和 Chrome；首次在 OpenClaw 配置模型 Key，并在 <code>chrome://extensions</code> 加载 <code>extensions\customer-ai-rpa</code>。真实平台登录态由客户自己的 Chrome 保存。</p></div>
-          <div class="card"><h3>交付安全边界</h3><p>打包脚本不会复制本机 <code>.env</code>、OpenClaw <code>data</code>、Cookie、聊天记录或日志。自动发送默认关闭，需客户确认后在插件中单独开启。</p></div>
+          <div class="card"><h3>首次客户配置</h3><p>客服电脑仍需安装 Docker Desktop 和 Chrome；首次在便携包 <code>.env</code> 配置 <code>AGNES_API_KEY</code>（及 Embedding Key），并在 <code>chrome://extensions</code> 加载 <code>extensions\customer-ai-rpa</code>。真实平台登录态由客户自己的 Chrome 保存。</p></div>
+          <div class="card"><h3>交付安全边界</h3><p>对外交付宜使用 <code>-SafeSendDefaults</code> 并避免把本机密钥打进包；OpenClaw <code>data</code>、Cookie、聊天记录或日志不会复制。自动发送默认关闭，需客户确认后在插件中单独开启。</p></div>
         </div>
       </section>
 
       <section id="debug">
         <h2>十三、推荐排障顺序</h2>
         <div class="grid two">
-          <div class="card"><h3>没有生成回复</h3><ol><li>检查 3001 WebSocket 状态。</li><li>确认 inbound 是否入库。</li><li>检查 BullMQ waiting/active/failed。</li><li>确认 RAG 是否返回证据。</li><li>检查 OpenClaw 超时或错误。</li><li>查看 ReplyDraft 风险和状态。</li></ol></div>
+          <div class="card"><h3>没有生成回复</h3><ol><li>检查 3001 WebSocket 状态。</li><li>确认 inbound 是否入库。</li><li>检查 BullMQ waiting/active/failed。</li><li>确认 RAG 是否返回证据。</li><li>检查 <code>/health/llm</code>、<code>AGNES_API_KEY</code> 与 LLM 超时/错误。</li><li>查看 ReplyDraft 风险和状态。</li></ol></div>
           <div class="card"><h3>答非所问或重复发送</h3><ol><li>核对 messageId 与 draft.messageId。</li><li>检查旧 pending 是否被重放。</li><li>确认当前 conversationId 未切换。</li><li>检查 outbound 是否把草稿标记 sent。</li><li>确认没有多个 Mock 页面同时监听。</li></ol></div>
         </div>
       </section>

@@ -27,8 +27,8 @@ const fileGroups = [
     ['apps/api/package.json', 'API 依赖及开发、构建、Prisma、Mock 命令。', '根 package.json 和锁文件。'],
     ['apps/api/tsconfig.json', 'API TypeScript 编译配置。', '新增源码目录。'],
     ['apps/api/src/main.ts', '创建 Fastify，注册路由、Worker 和 WebSocket。', '路由、生命周期和端口。'],
-    ['apps/api/src/config/env.ts', 'UTF-8 读取根 .env；OpenClaw 路径未配置时自动发现包内 openclaw/。', '.env.example 和各 Service。'],
-    ['apps/api/src/dev/run-all.ts', '编排 Docker、OpenClaw、API、RAG、Mock 和专用 Chrome。', '端口、进程清理、README。'],
+    ['apps/api/src/config/env.ts', 'UTF-8 读取根 .env；解析 LLM_PROVIDER（默认 Agnes 直连）与可选 OpenClaw 路径。', '.env.example 和各 Service。'],
+    ['apps/api/src/dev/run-all.ts', '编排 Docker、可选 OpenClaw、API、RAG、Mock 和专用 Chrome。', '端口、进程清理、README。'],
     ['apps/api/src/lib/prisma.ts', '创建 Prisma Client。', 'schema.prisma 和 DATABASE_URL。'],
     ['apps/api/src/lib/queue.ts', '创建 Redis/BullMQ 连接与 inbound 队列。', 'ReplyWorker 和队列排障。'],
     ['apps/api/prisma/schema.prisma', '门店、会话、消息、草稿和旧知识模型。', '迁移与 Service 查询。'],
@@ -56,7 +56,7 @@ const fileGroups = [
     ['apps/api/src/services/embedding.service.ts', 'API 旧知识表 Embedding 兼容实现。', '新检索由 8787 负责。'],
     ['apps/api/src/services/knowledge.service.ts', '旧知识片段写入和搜索。', '避免与 rag-service 再次分叉。'],
     ['apps/api/src/services/rag.service.ts', '调用 8787 Hybrid 检索并兼容旧 Chunk。', 'ReplyWorker、RAG API Key。'],
-    ['apps/api/src/services/openclaw.service.ts', 'OpenClaw 回复、订单意图、DOM 分析和纯文本清理。', 'ReplyWorker 与 Token。'],
+    ['apps/api/src/services/openclaw.service.ts', 'LLM 回复生成（默认 Agnes 直连；可选本机 OpenClaw）、订单意图、DOM 分析。', 'ReplyWorker 与 env.LLM_*。'],
     ['apps/api/src/services/order.service.ts', '订单识别、多轮等待订单号判断、公司系统查询和脱敏。', '订单 Adapter/TODO。'],
     ['apps/api/src/services/order-routing.test.ts', '回归测试多轮纯订单号路由和普通编号防误判。', 'OrderService 与 ReplyWorker 路由顺序。'],
     ['apps/api/src/services/safety.service.ts', '高风险、禁止承诺和自动发送判定。', 'AGENTS 风控。'],
@@ -65,7 +65,7 @@ const fileGroups = [
     ['apps/api/src/services/wecom-crypto.service.ts', '企微签名验证和消息加解密。', 'Token/AES Key。'],
     ['apps/api/src/utils/chunk-text.ts', '旧知识文本切片。', '不要用于替代知识卡片。'],
     ['apps/api/src/utils/terminal-log.ts', '终端彩色业务日志：检索、草稿、推送、发送按钮点击结果。', 'Windows 终端需支持 ANSI；仅开发排查用。'],
-    ['apps/api/src/workers/reply.worker.ts', '消费消息队列；先做多轮订单路由，非订单才执行 RAG，再调用 OpenClaw、风控和生成草稿。', '回复主链路排障入口。']
+    ['apps/api/src/workers/reply.worker.ts', '消费消息队列；先做多轮订单路由，非订单才执行 RAG，再调用 LLM、风控和生成草稿。', '回复主链路排障入口。']
   ]],
   ['RPA 与 Chrome 插件', [
     ['apps/api/src/rpa/extension-gateway.ts', '本地 WebSocket、会话注册、仅推送 expectedMessageId 匹配草稿。', 'background.js 协议。'],
@@ -147,7 +147,7 @@ const fileGroups = [
     ['packages/rpa-sdk/package.json', 'RPA SDK 包定义。', '根构建。'],
     ['packages/rpa-sdk/tsconfig.json', 'RPA SDK 编译配置。', '源码导出。'],
     ['packaging/windows-portable/Start-Customer-AI.bat', '双击启动入口。', 'Start PowerShell。'],
-    ['packaging/windows-portable/Start-Customer-AI.ps1', '便携环境检查与一键启动。', 'Docker/OpenClaw/RAG/API/引导页 /guide。'],
+    ['packaging/windows-portable/Start-Customer-AI.ps1', '便携环境检查与一键启动；非 openclaw 时跳过本机网关。', 'Docker/LLM/RAG/API/引导页 /guide。'],
     ['packaging/windows-portable/getting-started.html', '便携包启动引导页（配置流程、白名单编辑、快捷入口、状态检测）。', '/guide 路由、Start-Customer-AI.ps1、/rpa/allowlist。'],
     ['packaging/windows-portable/handoff.html', '最小转人工工作台页面。', '/handoff 路由、ReplyDraft 高/中风险。'],
     ['docs/deployment-guide.html', '源码部署、Windows 便携交付、生产基线、RPA 灰度、验收和回滚手册。', 'README、打包脚本、project-flow.html。'],
@@ -155,7 +155,7 @@ const fileGroups = [
     ['packaging/windows-portable/Stop-Customer-AI.bat', '双击停止入口。', 'Stop PowerShell。'],
     ['packaging/windows-portable/Stop-Customer-AI.ps1', '停止本项目服务。', '不得误杀无关进程。'],
     ['packaging/windows-portable/Doctor-Customer-AI.bat', '双击诊断入口。', 'Doctor PowerShell。'],
-    ['packaging/windows-portable/Doctor-Customer-AI.ps1', '检查端口、OpenClaw、RAG、API 和扩展文件。', '端口变化同步。'],
+    ['packaging/windows-portable/Doctor-Customer-AI.ps1', '检查端口、LLM/OpenClaw、RAG、API 和扩展文件。', '端口变化同步。'],
     ['packaging/windows-portable/使用说明.txt', '最终用户安装扩展和日常启停说明。', '交付变化同步。']
   ]],
   ['后台、文档、样例与生成物', [

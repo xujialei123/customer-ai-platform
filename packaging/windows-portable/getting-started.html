@@ -246,11 +246,11 @@
 <body>
   <header>
     <h1>客服 AI 便携包 · 使用与配置引导</h1>
-    <p>按下面步骤完成首次配置。服务启动后，本页会自动检测 API、OpenClaw、知识库和 Chrome 插件连接状态。</p>
+    <p>按下面步骤完成首次配置。服务启动后，本页会自动检测 API、LLM、知识库和 Chrome 插件连接状态。</p>
     <div class="status-bar" id="statusBar">
       <span class="pill"><span class="dot" id="dotApi"></span>API</span>
       <span class="pill"><span class="dot" id="dotRag"></span>知识库 RAG</span>
-      <span class="pill"><span class="dot" id="dotOpenClaw"></span>OpenClaw</span>
+      <span class="pill"><span class="dot" id="dotOpenClaw"></span>LLM</span>
       <span class="pill"><span class="dot" id="dotExt"></span>Chrome 插件</span>
       <span class="pill"><span class="dot" id="dotAutoSend"></span>自动发送策略</span>
     </div>
@@ -272,12 +272,14 @@
             <li class="step">
               <div class="num">2</div>
               <div>
-                <h3>填写模型与 OpenClaw 配置</h3>
-                <p>编辑便携包根目录 <code>.env</code>，至少配置 LLM / Embedding API Key。OpenClaw 路径<strong>不用填</strong>：启动脚本与 API 会自动使用包内 <code>openclaw/</code> 及其中的 gateway token。</p>
+                <h3>填写 LLM（Agnes）与 Embedding</h3>
+                <p>编辑便携包根目录 <code>.env</code>。默认直连 Agnes，无需启动本机 OpenClaw。至少配置：</p>
                 <ul>
-                  <li><code>LLM_API_KEY</code> 或 OpenClaw 配置页中的模型 Key</li>
-                  <li><code>OPENCLAW_GATEWAY_URL</code> 默认 <code>http://127.0.0.1:18789</code>（一般无需改）</li>
+                  <li><code>LLM_PROVIDER=agnes</code>（默认）</li>
+                  <li><code>AGNES_API_URL</code>、<code>AGNES_API_KEY</code>、<code>AGNES_MODEL</code></li>
+                  <li><code>EMBEDDING_API_KEY</code> 等向量检索相关项</li>
                 </ul>
+                <p>若改用本机 OpenClaw，设置 <code>LLM_PROVIDER=openclaw</code> 后再启动网关。</p>
               </div>
             </li>
             <li class="step">
@@ -330,8 +332,8 @@
           <a class="link-btn" href="http://127.0.0.1:3001/rpa/extension/status" target="_blank" rel="noreferrer">
             <span>插件连接状态</span><small>选择器 / 白名单 / 未读</small>
           </a>
-          <a class="link-btn" href="http://127.0.0.1:18788/" target="_blank" rel="noreferrer">
-            <span>OpenClaw 配置</span><small>模型 Key 与网关</small>
+          <a class="link-btn" href="http://127.0.0.1:3001/health/llm" target="_blank" rel="noreferrer">
+            <span>LLM 状态</span><small>Agnes / Provider 配置</small>
           </a>
           <a class="link-btn" href="portable-test-checklist.html" target="_blank" rel="noreferrer">
             <span>便携包测试清单</span><small>打包后验收（可勾选）</small>
@@ -406,7 +408,7 @@
         const data = await res.json();
         setDot('dotApi', data.api?.ok ? 'ok' : 'bad');
         setDot('dotRag', data.rag?.ok ? 'ok' : 'bad');
-        setDot('dotOpenClaw', data.openclaw?.ok ? 'ok' : (data.openclaw?.configured ? 'warn' : 'bad'));
+        setDot('dotOpenClaw', (data.llm?.ok ?? data.openclaw?.ok) ? 'ok' : ((data.llm?.configured ?? data.openclaw?.configured) ? 'warn' : 'bad'));
         setDot('dotExt', data.extension?.connectedClients > 0 ? 'ok' : 'warn');
         setDot('dotAutoSend', data.extension?.rpaAutoSendEnabled ? 'ok' : 'warn');
         const handoffHint = document.getElementById('handoffLinkHint');
@@ -416,6 +418,8 @@
         }
 
         const rows = [
+          ['LLM_PROVIDER', data.config?.llmProvider || data.llm?.provider || '-'],
+          ['LLM_MODEL', data.config?.llmModel || data.llm?.model || '-'],
           ['AUTO_REPLY_ENABLED', data.config?.autoReplyEnabled ? tag('已开启', 'ok') : tag('未开启', 'warn')],
           ['RPA_AUTO_SEND_ENABLED', data.config?.rpaAutoSendEnabled ? tag('已开启', 'ok') : tag('未开启', 'warn')],
           ['MEITUAN_RPA_MODE', data.config?.meituanRpaMode || '-'],

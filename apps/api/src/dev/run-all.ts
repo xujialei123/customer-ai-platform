@@ -336,13 +336,20 @@ async function main() {
     const dockerReady = await ensureDockerServices();
     if (!dockerReady)
         process.exit(1);
-    const openClawReady = await ensureOpenClaw();
-    if (!openClawReady)
-        process.exit(1);
+    // 默认直连 Agnes 等远端 LLM，不强制本机 OpenClaw；仅 LLM_PROVIDER=openclaw 时才拦启动。
+    const llmProvider = String(process.env.LLM_PROVIDER ?? 'agnes').trim().toLowerCase();
+    if (llmProvider === 'openclaw') {
+        const openClawReady = await ensureOpenClaw();
+        if (!openClawReady)
+            process.exit(1);
+    }
+    else {
+        writeLine(`[dev] LLM_PROVIDER=${llmProvider}，跳过本机 OpenClaw 网关`);
+    }
     for (const item of processes) {
         startProcess(item);
     }
-    writeLine('开发环境启动中：OpenClaw + API + RAG 知识库页面 + RPA mock 页面 + Chrome 扩展网关');
+    writeLine(`开发环境启动中：LLM(${llmProvider}) + API + RAG 知识库页面 + RPA mock 页面 + Chrome 扩展网关`);
     writeLine('[dev] 美团扩展状态：http://127.0.0.1:3001/rpa/extension/status');
     writeLine('[dev] 知识库上传页面：http://127.0.0.1:8787/kb-admin');
     void openKnowledgeAdminWhenReady();

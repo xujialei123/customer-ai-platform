@@ -2,8 +2,8 @@
 /**
  * @file apps/api/src/services/openclaw.service.ts
  * @module API Service 与 Worker
- * @description OpenClaw 回复生成、订单意图识别和纯文本清理。
- * @see 联动关注：ReplyWorker 与 Token 文件。
+ * @description LLM 回复生成（默认直连 Agnes / OpenAI 兼容接口；可选本机 OpenClaw 网关）。
+ * @see 联动关注：ReplyWorker、env.LLM_PROVIDER、订单脱敏结果。
  */
 import { env } from '../config/env.js';
 import { z } from 'zod';
@@ -176,13 +176,11 @@ export class OpenClawClient {
             }
         ]);
     }
-    // 统一封装 OpenClaw 调用，避免业务代码到处拼接口。
+    // 统一封装 chat completions 调用（默认直连 Agnes；openclaw 仅作可选本机网关）。
     async generateReply(input) {
         if (this.shouldUseLocalFallback()) {
-            return this.generateLocalFallback(input, 'OpenClaw 未配置，使用本地兜底草稿');
+            return this.generateLocalFallback(input, `LLM 未配置（provider=${env.LLM_PROVIDER}），使用本地兜底草稿`);
         }
-        const endpoint = env.OPENCLAW_CHAT_ENDPOINT.replace('{agentId}', env.OPENCLAW_AGENT_ID);
-        const url = `${env.OPENCLAW_GATEWAY_URL}${endpoint}`;
         const systemRules = [
             '你是门店团购客服助手。',
             '你只能根据知识库内容和门店规则回答。',
@@ -205,12 +203,9 @@ export class OpenClawClient {
             '',
             '请只根据上面的知识库内容，直接回复客户可见的话术。'
         ].join('\n');
-        // OpenClaw 本地网关当前暴露的是 OpenAI 兼容的 chat_completions 接口。
-        // 这里把 RAG 结果塞进用户消息，确保模型不会绕过知识库自由发挥。
-        // 即使模型本身能力很强，也必须被限制在知识库上下文里，避免客服场景胡编门店规则。
+        // 把 RAG 结果塞进用户消息，确保模型不会绕过知识库自由发挥。
         const payload = {
-            model: env.OPENCLAW_MODEL,
-            user: input.conversationHistory.at(-1)?.content,
+            model: env.LLM_CHAT_MODEL,
             messages: [
                 {
                     role: 'system',
@@ -225,26 +220,25 @@ export class OpenClawClient {
         };
         let res;
         try {
-            res = await fetch(url, {
+            res = await fetch(env.LLM_CHAT_URL, {
                 method: 'POST',
                 signal: AbortSignal.timeout(env.OPENCLAW_TIMEOUT_MS),
                 headers: {
-                    Authorization: `Bearer ${env.OPENCLAW_TOKEN}`,
+                    Authorization: `Bearer ${env.LLM_CHAT_API_KEY}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(payload)
             });
         }
         catch (error) {
-            return this.generateLocalFallback(input, `OpenClaw 请求异常：${error instanceof Error ? error.message : String(error)}`);
+            return this.generateLocalFallback(input, `LLM 请求异常：${error instanceof Error ? error.message : String(error)}`);
         }
         if (!res.ok) {
             const body = await res.text();
-            return this.generateLocalFallback(input, `OpenClaw 请求失败：${res.status} ${body}`);
+            return this.generateLocalFallback(input, `LLM 请求失败：${res.status} ${body}`);
         }
         const raw = await res.json();
-        // 不同 OpenClaw / LLM 服务返回格式可能不同，这里做宽松兼容。
-        // 兼容层集中在这里，避免 ReplyWorker 关心具体模型网关的响应细节。
+        // 兼容层集中在这里，避免 ReplyWorker 关心具体模型厂商的响应细节。
         const generatedContent = raw.choices?.[0]?.message?.content?.trim()
                 ?? raw.output_text?.trim()
                 ?? raw.result?.text?.trim()
@@ -252,17 +246,24 @@ export class OpenClawClient {
                 ?? raw.reply
                 ?? raw.message
                 ?? '这个我帮您转人工确认一下。';
+        // Agnes 偶发 content 为空只给 reasoning；不对客输出思考过程，直接兜底转人工文案。
+        const safeContent = String(generatedContent || '').trim()
+            || '这个我帮您转人工确认一下。';
         return {
-            content: sanitizeCustomerReply(generatedContent, input.message),
+            content: sanitizeCustomerReply(safeContent, input.message),
             confidence: raw.confidence ?? 0.7,
-            raw
+            raw: { ...raw, provider: env.LLM_PROVIDER }
         };
     }
     shouldUseLocalFallback() {
-        // demo 默认 token 是占位值，不能真的请求模型网关；这里直接走本地兜底，避免本地调试时刷 404。
-        return !env.OPENCLAW_TOKEN
-            || env.OPENCLAW_TOKEN === 'replace-me'
-            || env.OPENCLAW_TOKEN === 'your_openclaw_token';
+        const key = String(env.LLM_CHAT_API_KEY || '').trim();
+        const url = String(env.LLM_CHAT_URL || '').trim();
+        if (!url || !key)
+            return true;
+        // demo 占位 token 不能真的请求模型。
+        if (['replace-me', 'your_openclaw_token', 'your_llm_key', 'your_agenes_key', 'your_agnes_key'].includes(key))
+            return true;
+        return false;
     }
     analyzeOrderActionLocally(message) {
         const highRiskKeywords = ['退款', '投诉', '差评', '赔偿', '食品安全', '吃坏', '过敏', '报警', '12315', '工商', '法律', '律师', '威胁'];
@@ -282,18 +283,18 @@ export class OpenClawClient {
         return { action: 'none' };
     }
     async requestText(messages, timeoutMs = env.OPENCLAW_TIMEOUT_MS) {
-        const endpoint = env.OPENCLAW_CHAT_ENDPOINT.replace('{agentId}', env.OPENCLAW_AGENT_ID);
-        const url = `${env.OPENCLAW_GATEWAY_URL}${endpoint}`;
+        if (this.shouldUseLocalFallback())
+            return null;
         try {
-            const response = await fetch(url, {
+            const response = await fetch(env.LLM_CHAT_URL, {
                 method: 'POST',
                 // 工具路由不能被模型网关长期阻塞；超时后会使用本地确定性规则继续处理。
                 signal: AbortSignal.timeout(timeoutMs),
                 headers: {
-                    Authorization: `Bearer ${env.OPENCLAW_TOKEN}`,
+                    Authorization: `Bearer ${env.LLM_CHAT_API_KEY}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ model: env.OPENCLAW_MODEL, messages })
+                body: JSON.stringify({ model: env.LLM_CHAT_MODEL, messages })
             });
             if (!response.ok)
                 return null;

@@ -277,7 +277,32 @@ function Show-OpenClawManualHint {
   Write-Host ''
 }
 
+function Read-PackagedEnvValue([string]$Name) {
+  $path = Join-Path $Root '.env'
+  if (-not (Test-Path -LiteralPath $path)) { return $null }
+  $text = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
+  $pattern = "(?m)^\s*$([regex]::Escape($Name))\s*=\s*(.*)$"
+  $match = [regex]::Match($text, $pattern)
+  if (-not $match.Success) { return $null }
+  $raw = $match.Groups[1].Value.Trim()
+  if (($raw.StartsWith('"') -and $raw.EndsWith('"')) -or ($raw.StartsWith("'") -and $raw.EndsWith("'"))) {
+    return $raw.Substring(1, $raw.Length - 2)
+  }
+  return $raw
+}
+
+function Test-NeedsLocalOpenClaw {
+  $provider = (Read-PackagedEnvValue 'LLM_PROVIDER')
+  if ([string]::IsNullOrWhiteSpace($provider)) { $provider = 'agnes' }
+  return ($provider.Trim().ToLowerInvariant() -eq 'openclaw')
+}
+
 function Ensure-OpenClawGateway {
+  if (-not (Test-NeedsLocalOpenClaw)) {
+    Write-Host 'LLM: direct provider configured; skipping local OpenClaw gateway.' -ForegroundColor DarkGray
+    return
+  }
+
   $gatewayUrl = 'http://127.0.0.1:18789/'
   if (Wait-Http $gatewayUrl 2) {
     Write-Host 'OpenClaw: gateway already reachable on port 18789.' -ForegroundColor DarkGray
@@ -302,6 +327,7 @@ function Ensure-OpenClawGateway {
     '',
     "Manual start: $startScript",
     'Logs: openclaw\data\logs',
+    'Or set LLM_PROVIDER=agnes and configure AGNES_API_KEY to skip OpenClaw.',
     'Then run Start-Customer-AI.bat again if needed.'
   ) -join [Environment]::NewLine)
 }
@@ -339,6 +365,10 @@ Write-Host 'Handoff:        http://127.0.0.1:3001/handoff' -ForegroundColor Gree
 Write-Host 'Customer AI workspace is running.' -ForegroundColor Green
 Write-Host 'Knowledge Base: http://127.0.0.1:8787/kb-admin'
 Write-Host 'API:            http://127.0.0.1:3001/health'
-Write-Host 'OpenClaw:       http://127.0.0.1:18789/'
+if (Test-NeedsLocalOpenClaw) {
+  Write-Host 'OpenClaw:       http://127.0.0.1:18789/'
+} else {
+  Write-Host 'LLM:            direct (Agnes / OpenAI-compatible; OpenClaw skipped)'
+}
 Write-Host 'RPA Extension:  extensions\customer-ai-rpa'
 Write-Host 'API logs:       data\logs\api.out.log'

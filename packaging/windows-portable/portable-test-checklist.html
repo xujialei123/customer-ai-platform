@@ -199,22 +199,22 @@ pnpm package:windows</pre>
         <input type="checkbox" />
         <div>
           <strong>Doctor 自检通过</strong>
-          <p>运行 <code>Doctor-Customer-AI.bat</code>：Portable Node / API / RAG / OpenClaw / Extension / Docker 均为 OK 或 HTTP 200。</p>
+          <p>运行 <code>Doctor-Customer-AI.bat</code>：Portable Node / API / RAG / LLM / Extension / Docker 均为 OK 或 HTTP 200（仅 <code>LLM_PROVIDER=openclaw</code> 时才检查 OpenClaw）。</p>
         </div>
       </label>
       <label class="item" data-id="boot-3">
         <input type="checkbox" />
         <div>
           <strong>引导页五项状态正常</strong>
-          <p>API、RAG、OpenClaw 绿点；加载扩展后「Chrome 插件」变绿。默认 <code>AUTO_REPLY_ENABLED=false</code>、<code>RPA_AUTO_SEND_ENABLED=false</code> 显示为未开启（安全默认）。</p>
+          <p>API、RAG、LLM 绿点；加载扩展后「Chrome 插件」变绿。默认 <code>AUTO_REPLY_ENABLED=false</code>、<code>RPA_AUTO_SEND_ENABLED=false</code> 显示为未开启（安全默认）。</p>
         </div>
       </label>
       <label class="item" data-id="boot-4">
         <input type="checkbox" />
         <div>
-          <strong>配置 OpenClaw 与知识库</strong>
+          <strong>配置 Agnes LLM 与知识库</strong>
           <ul>
-            <li>填写便携包 <code>.env</code> 或 OpenClaw 配置页的模型 Key</li>
+            <li>填写便携包 <code>.env</code> 中 <code>AGNES_API_KEY</code>（及 Embedding Key）</li>
             <li>打开 <code>http://127.0.0.1:8787/kb-admin</code> 上传/编译门店知识库</li>
             <li>在 <code>/guide</code> 配置美团/抖音白名单（灰度期建议只填测试客户）</li>
           </ul>
