@@ -196,12 +196,27 @@ async function connect() {
     if (message.type === 'draft') {
       // 服务端会带回会话标识，扩展按注册时的 tab/frame 精确投递，避免多客户并发时串话。
       const target = resolveDraftTarget(message.session);
-      if (target)
+      if (target) {
         chrome.tabs.sendMessage(target.tabId, {
           type: 'applyDraft',
           session: message.session,
           payload: message.payload
         }, { frameId: target.frameId }).catch(() => undefined);
+      } else if (message.session?.platform === 'douyin') {
+        // 抖音 conversationId（conGroupId）与昵称登记不一致时，精确路由会丢帧。
+        // 兜底：向所有来客 tab 广播，由 content ensureConversationForDraft 再强制切对客户。
+        void chrome.tabs.query({ url: ['https://life.douyin.com/*'] }).then((tabs) => {
+          for (const tab of tabs) {
+            if (!tab.id)
+              continue;
+            chrome.tabs.sendMessage(tab.id, {
+              type: 'applyDraft',
+              session: message.session,
+              payload: message.payload
+            }).catch(() => undefined);
+          }
+        });
+      }
     }
     if (message.type === 'connected') {
       const profiles = { ...(await chrome.storage.local.get('platformProfiles')).platformProfiles || {} };
@@ -269,6 +284,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }
     send({ type: 'hello', payload: message.payload });
+  }
+  if (message.type === 'request_drafts') {
+    // 切回待回复会话：注册目标并请网关立刻把 pending 草稿推回来发送，避免再跑一遍 LLM。
+    registerSessionTarget(message.payload, sender.tab?.id, sender.frameId ?? 0);
+    send({ type: 'request_drafts', payload: message.payload });
   }
   if (message.type === 'clearFrameSession') {
     // 当前 frame 已切到非白名单客户时，清理旧会话映射，避免状态页和草稿投递仍指向上一个测试客户。

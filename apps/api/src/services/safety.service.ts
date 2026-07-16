@@ -15,7 +15,72 @@ export function isCasualCustomerMessage(message) {
         return true;
     if (/^(谢谢|谢谢您|多谢|感谢|好的|嗯嗯|嗯|ok|okay|收到|明白|了解|知道了|好哒|拜拜|再见)[呀啊呵哈～~!！。.]*$/i.test(text))
         return true;
+    // 短促笑声/语气词：客户常用来试探在不在，知识库天然召不回，不应卡成 medium 仅回填。
+    if (/^(嘻嘻|哈哈|呵呵|嘿嘿|啦啦|哟|呀|哦|噢|嗯呢|在呢)[呀啊呵哈～~!！。.]*$/i.test(text))
+        return true;
+    // 「x嘻嘻」这类：抽中文核心再判一次寒暄。
+    const chineseCore = text.replace(/[^\u4e00-\u9fff]/g, '');
+    if (chineseCore
+        && chineseCore.length <= 8
+        && /^(你好|您好|在吗|嘻嘻|哈哈|呵呵|嘿嘿|谢谢|好的|嗯嗯|收到|明白)$/.test(chineseCore))
+        return true;
     return false;
+}
+
+/** 会话渠道中文名：写进提示词，避免模型再问「美团还是抖音」。 */
+export function platformChannelLabel(platform) {
+    const raw = String(platform || '').toLowerCase();
+    if (raw === 'douyin')
+        return '抖音来客（抖音生活服务）';
+    if (raw === 'meituan')
+        return '美团经营宝（美团到店团购）';
+    if (raw === 'wecom')
+        return '企业微信客服';
+    return '';
+}
+
+/**
+ * 美团/抖音经营端常拦截「微信/QQ」等站外导流词，提交会失败。
+ * 出稿前改成「本对话」表述；并去掉「您是在美团还是抖音买的」这类跨平台追问。
+ */
+export function sanitizePlatformOutboundText(content, platform) {
+    let text = String(content ?? '');
+    if (!text)
+        return text;
+    text = text
+        .replace(/随时\s*(用)?\s*(微信|威信|vx|v信)\s*(跟|和)?\s*我说/gi, '随时在本对话跟我说')
+        .replace(/加\s*(我|个|一下)?\s*(的)?\s*(微信|威信|vx|v信|微信号)/gi, '在本对话联系我')
+        .replace(/(微信|威信|vx|v信)\s*(号|联系)/gi, '本对话联系')
+        .replace(/微信号|威信号/g, '联系方式')
+        .replace(/微信|威信|v信/gi, '本对话')
+        .replace(/\b(wechat)\b/gi, '本对话')
+        .replace(/\bvx\b/gi, '本对话')
+        .replace(/扣扣\s*号?|\bqq\b/gi, '本对话')
+        .replace(/本对话本对话/g, '本对话')
+        .replace(/本对话\s*本对话/g, '本对话');
+
+    const channel = String(platform || '').toLowerCase();
+    // 客户已在某一端进线：再问「美团还是抖音」既多余，也容易被平台风控标红/拒发。
+    if (channel === 'douyin' || channel === 'meituan' || channel === 'wecom') {
+        text = text
+            .replace(/[，,]?\s*方便告诉我您是在美团还是抖音买的吗[？?]?\s*/g, '。方便的话把订单号或订单截图发在本对话，我帮您查。')
+            .replace(/[，,]?\s*您是在美团还是抖音(上|买的)?吗[？?]?\s*/g, '。')
+            .replace(/[，,]?\s*(是在)?美团还是抖音[？?]?\s*/g, '。')
+            .replace(/[，,]?\s*您是在抖音还是美团(上|买的)?吗[？?]?\s*/g, '。')
+            .replace(/[，,]?\s*(是在)?抖音还是美团[？?]?\s*/g, '。');
+    }
+    if (channel === 'douyin') {
+        // 抖音会话里不要主动把客户往美团导；不整词抹掉「美团」，避免误伤正常说明。
+        text = text.replace(/[，,]?\s*去美团(看看|买|下单|咨询)?[。！!]?\s*/g, '。');
+    }
+    if (channel === 'meituan') {
+        text = text.replace(/[，,]?\s*去抖音(看看|买|下单|咨询)?[。！!]?\s*/g, '。');
+    }
+
+    return text
+        .replace(/。{2,}/g, '。')
+        .replace(/^[。，,\s]+/, '')
+        .trim();
 }
 
 export class SafetyService {
@@ -66,11 +131,13 @@ export class SafetyService {
                 riskLevel: 'low'
             };
         }
+        // 知识库未命中：仍交 AI 澄清/回答，并允许自动发送（高风险词已在上面拦截）。
+        // 业务默认「有召回更稳」；无召回时由模型按系统提示避免胡编承诺。
         if ((input.ragHitCount ?? 0) === 0) {
             return {
-                allowAutoSend: false,
-                riskLevel: 'medium',
-                reason: '知识库未召回内容，建议人工确认或先澄清客户需求'
+                allowAutoSend: true,
+                riskLevel: 'low',
+                reason: '知识库未召回，由 AI 直接处理'
             };
         }
         if (input.aiReply && this.forbiddenCommitments.some((kw) => input.aiReply.includes(kw))) {

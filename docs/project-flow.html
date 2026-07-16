@@ -66,7 +66,7 @@
   <div class="layout">
     <nav>
       <strong>流程目录</strong>
-      <a href="#position">项目定位</a><a href="code-review-guide.html">代码梳理指南 ↗</a><a href="#services">启动与服务</a><a href="#knowledge">知识库流程</a>
+      <a href="#position">项目定位</a><a href="code-review-guide.html">代码梳理指南 ↗</a><a href="extension-rpa-flow.html">扩展 RPA 逻辑 ↗</a><a href="#services">启动与服务</a><a href="#knowledge">知识库流程</a>
       <a href="#message">消息回复流程</a><a href="#retrieval">Hybrid RAG</a><a href="#rpa">RPA 多会话</a>
       <a href="#context">上下文与去重</a><a href="#orders">订单查询</a><a href="#safety">风控规则</a>
       <a href="#storage">数据存储</a><a href="#files">文件职责索引</a><a href="#operation">操作顺序</a><a href="deployment-guide.html">部署手册 ↗</a><a href="#debug">排障顺序</a><a href="#limits">当前边界</a>
@@ -74,7 +74,7 @@
     <main>
       <section id="position">
         <h2>一、项目定位</h2>
-        <p class="lead">统一接入企业微信、美团到店和抖音来客消息，通过知识库检索、可配置大模型（默认 Agnes，或自定义 OpenAI 兼容接口）组织话术和风险控制，输出自动回复或人工审核草稿。平台接入必须经过 Adapter；LLM 只负责话术。Embedding 与 LLM 均可在 <code>/guide</code> 配置页热更新，无需写死厂商。</p>
+        <p class="lead">统一接入企业微信、美团到店和抖音来客消息，通过知识库检索、可配置大模型（默认 Agnes，可选千问 DashScope，或自定义 OpenAI 兼容接口）组织话术和风险控制，输出自动回复或人工审核草稿。平台接入必须经过 Adapter；LLM 只负责话术。Embedding 与 LLM 均可在 <code>/guide</code> 配置页热更新，无需写死厂商。</p>
         <div class="grid" style="margin-top:16px">
           <div class="card"><span class="tag green">官方接口</span><h3>企业微信</h3><p>使用官方 Webhook/API 接收和发送消息，默认关闭自动发送。</p></div>
           <div class="card"><span class="tag amber">RPA Adapter</span><h3>美团到店</h3><p>Chrome 扩展监听已登录页面 DOM，通过本地 WebSocket 与 API 通信。</p></div>
@@ -89,7 +89,7 @@
           <tr><td>API</td><td><code>3001</code></td><td>消息接入、Adapter、BullMQ、ReplyDraft、Chrome WebSocket 网关</td></tr>
           <tr><td>RPA Mock</td><td><code>3100</code></td><td>模拟美团/抖音多客户会话、未读角标和页面发送动作</td></tr>
           <tr><td>RAG Service</td><td><code>8787</code></td><td>上传解析、Wiki、Knowledge Card、Hybrid Retrieval、Graph、Gap</td></tr>
-          <tr><td>LLM（配置页）</td><td>远程 HTTPS</td><td><code>/guide</code> 可选 Agnes 或自定义 OpenAI 兼容 Base URL / Model / Key；热生效</td></tr>
+          <tr><td>LLM（配置页）</td><td>远程 HTTPS</td><td><code>/guide</code> 可选 Agnes、千问（DashScope 兼容模式）或自定义 OpenAI 兼容 Base URL / Model / Key；热生效</td></tr>
           <tr><td>Embedding（配置页）</td><td>远程 HTTPS</td><td>同上页面配置向量接口；同步到 RAG，热生效；维度改动需重编译知识库</td></tr>
           <tr><td>OpenClaw（可选）</td><td><code>18789</code></td><td>仅 <code>LLM_PROVIDER=openclaw</code> 时需要本机网关</td></tr>
           <tr><td>PostgreSQL</td><td><code>5433</code></td><td>业务消息、草稿、知识元数据和 pgvector 向量</td></tr>
@@ -109,7 +109,7 @@
 
       <section id="message">
         <h2>四、消息回复主链路</h2>
-        <div class="flow"><div class="step">Webhook / DOM<small>平台原始消息</small></div><div class="arrow">→</div><div class="step">Platform Adapter<small>转换 UnifiedMessage</small></div><div class="arrow">→</div><div class="step">MessageService<small>去重并入库</small></div><div class="arrow">→</div><div class="step">BullMQ<small>异步 ReplyWorker</small></div><div class="arrow">→</div><div class="step">Hybrid RAG<small>检索知识证据</small></div><div class="arrow">→</div><div class="step">可配置 LLM<small>Agnes / 自定义</small></div><div class="arrow">→</div><div class="step">SafetyService<small>自动发送或转人工</small></div></div>
+        <div class="flow"><div class="step">Webhook / DOM<small>平台原始消息</small></div><div class="arrow">→</div><div class="step">Platform Adapter<small>转换 UnifiedMessage</small></div><div class="arrow">→</div><div class="step">MessageService<small>去重并入库</small></div><div class="arrow">→</div><div class="step">BullMQ<small>异步 ReplyWorker</small></div><div class="arrow">→</div><div class="step">Hybrid RAG<small>检索知识证据</small></div><div class="arrow">→</div><div class="step">可配置 LLM<small>Agnes / 千问 / 自定义</small></div><div class="arrow">→</div><div class="step">SafetyService<small>自动发送或转人工</small></div></div>
       </section>
 
       <section id="retrieval">
@@ -153,7 +153,7 @@
           <div class="card"><span class="tag red">强制转人工</span><ul class="risk-list"><li>退款、退券、退钱（含「想退款/申请退款」等明确表述）</li><li>投诉、差评</li><li>赔偿、破损、丢失</li><li>食品安全、吃坏、过敏</li><li>报警、12315、工商、律师</li><li>打官司、走法律、找律师</li><li>威胁、辱骂、情绪激烈</li></ul></div>
           <div class="card"><span class="tag red">禁止承诺</span><ul><li>保证退款或赔偿</li><li>免费赠送或特殊折扣</li><li>私下交易或绕开平台规则</li><li>未经查询承诺订单状态</li><li>资料不足时自行推测</li></ul></div>
         </div>
-        <div class="notice">高风险草稿会进入 <a href="http://127.0.0.1:3001/handoff">转人工工作台</a>并将会话标为 <code>needs_human</code>。空召回等 medium 仍可先走 AI 澄清/人设回复，不立刻转人工；寒暄无知识命中按低风险处理。默认只生成草稿时，会把 pending 草稿并入多轮上下文。RPA 同文软去重只挡「仍在处理/刚发出的回扫气泡」，不把后续相近咨询当成重复；发送冷却按平台独立。</div>
+        <div class="notice">高风险草稿会进入 <a href="http://127.0.0.1:3001/handoff">转人工工作台</a>并将会话标为 <code>needs_human</code>。知识库空召回时仍由 AI 生成回复，风险标为 low 并允许 RPA 自动发送（退款/投诉等高风险词除外）；模型侧需避免无依据承诺。LLM 提示会注入当前会话渠道（抖音来客 / 美团经营宝 / 企微），禁止再问「美团还是抖音买的」；出稿与插件回填前会清洗微信导流词与跨平台追问。默认只生成草稿时，会把 pending 草稿并入多轮上下文。RPA 同文软去重只挡「仍在处理/刚发出的回扫气泡」，不把后续相近咨询当成重复；发送冷却按平台独立。</div>
       </section>
 
       <section id="storage">

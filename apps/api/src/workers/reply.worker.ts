@@ -14,7 +14,7 @@ import { MessageService } from '../services/message.service.js';
 import { OpenClawClient } from '../services/openclaw.service.js';
 import { OrderService } from '../services/order.service.js';
 import { RagService } from '../services/rag.service.js';
-import { SafetyService } from '../services/safety.service.js';
+import { SafetyService, sanitizePlatformOutboundText } from '../services/safety.service.js';
 import { SendService } from '../services/send.service.js';
 import { terminalLog } from '../utils/terminal-log.js';
 const ragService = new RagService();
@@ -110,7 +110,9 @@ export function startReplyWorker() {
                     // 近 10 条轮次（含并入的待发草稿）；摘要单独传，避免 slice 丢掉前情。
                     conversationHistory: history.slice(-10),
                     conversationSummary: conversation.summary || undefined,
-                    ragContext
+                    ragContext,
+                    // 抖音/美团会话必须带平台，避免模型再问「美团还是抖音买的」。
+                    platform: conversation.platform
                 });
                 openclawMs = Date.now() - openclawStarted;
                 // 超时/失败兜底也必须有对客正文；空字符串时再铺一层人话，避免千篇一律。
@@ -126,6 +128,8 @@ export function startReplyWorker() {
                 raw = { error: error instanceof Error ? error.message : String(error) };
             }
         }
+        // 经营宝/抖音拒收微信等站外导流词，并清洗跨平台追问：入库前再洗一遍。
+        reply = sanitizePlatformOutboundText(reply, conversation.platform);
         const finalRisk = safetyService.checkRisk({
             userMessage: inboundMessage.content,
             aiReply: reply,
@@ -188,7 +192,7 @@ export function startReplyWorker() {
                         ragContext: ragContext
                     }
                 });
-                // 只有高风险才进转人工台；空召回的 medium 仍可先用 AI 澄清，避免正常闲聊被标 needs_human。
+                // 只有高风险才进转人工台；空召回已按 low 走 AI 自动发送，不再因 medium 卡住。
                 if (finalRisk.riskLevel === 'high') {
                     await prisma.conversation.update({
                         where: { id: conversation.id },
@@ -225,7 +229,7 @@ export function startReplyWorker() {
                     ragContext: ragContext
                 }
             });
-            // 高风险进入转人工工作台；medium（如暂无召回）仍保留 AI 草稿，不立刻 needs_human。
+            // 高风险进入转人工工作台；空召回现为 low，由 AI 直接处理并可自动发送。
             if (finalRisk.riskLevel === 'high') {
                 await prisma.conversation.update({
                     where: { id: conversation.id },

@@ -63,6 +63,21 @@ function stripAnsi(text: string) {
     return text.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
+/** 北京时间（Asia/Shanghai）本地串，供终端与便携包日志对齐排查。 */
+function formatBeijingTime(date = new Date()) {
+    // sv-SE → YYYY-MM-DD HH:mm:ss，再锁到东八区，避免服务器本机时区干扰。
+    return new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }).format(date);
+}
+
 function appendPortableLogLine(line: string) {
     const root = process.env.CUSTOMER_AI_ROOT;
     if (!root)
@@ -107,7 +122,9 @@ export function terminalLog(event: TerminalLogEvent, details: TerminalLogDetails
         error: '错误'
     };
     const title = titleMap[event] ?? event;
+    const beijing = formatBeijingTime();
     const parts = [
+        paint(ansi.dim, beijing),
         paint(ansi.bold + color, `[RPA] ${title}`)
     ];
     if (details.customer)

@@ -319,7 +319,7 @@
               <div class="num">2</div>
               <div>
                 <h3>填写大模型与 Embedding</h3>
-                <p>在本页右侧「大模型 / Embedding」中选择 <strong>Agnes</strong> 或 <strong>自定义 OpenAI 兼容接口</strong>，并配置向量模型。保存后立即生效，无需重启。</p>
+                <p>在本页右侧「大模型 / Embedding」中选择 <strong>Agnes</strong>、<strong>千问（DashScope）</strong> 或 <strong>自定义 OpenAI 兼容接口</strong>，并配置向量模型。保存后立即生效，无需重启。</p>
               </div>
             </li>
             <li class="step">
@@ -373,7 +373,7 @@
             <span>插件连接状态</span><small>选择器 / 白名单 / 未读</small>
           </a>
           <a class="link-btn" href="http://127.0.0.1:3001/health/llm" target="_blank" rel="noreferrer">
-            <span>LLM 状态</span><small>Agnes / Provider 配置</small>
+            <span>LLM 状态</span><small>Agnes / 千问 / 自定义</small>
           </a>
           <a class="link-btn" href="portable-test-checklist.html" target="_blank" rel="noreferrer">
             <span>便携包测试清单</span><small>打包后验收（可勾选）</small>
@@ -392,16 +392,18 @@
 
           <div class="model-box">
             <h3>大模型（客服回复）</h3>
-            <p class="hint">协议为 OpenAI 兼容 <code>/chat/completions</code>。选 Agnes 会填入官方默认；其它厂商请选「自定义」自行填写。</p>
+            <p class="hint">协议为 OpenAI 兼容 <code>/chat/completions</code>。选 Agnes / 千问会填入官方默认；其它厂商请选「自定义」。千问 Key 在 <a href="https://platform.qianwenai.com/docs/developer-guides/getting-started/first-api-call" target="_blank" rel="noreferrer">千问云文档</a> 获取（环境变量名多为 <code>DASHSCOPE_API_KEY</code>）。</p>
             <label for="llmProvider">提供商</label>
             <select id="llmProvider">
               <option value="agnes">Agnes</option>
+              <option value="qianwen">千问（DashScope）</option>
               <option value="custom">自定义（OpenAI 兼容）</option>
             </select>
             <label for="llmBaseUrl">Base URL</label>
             <input id="llmBaseUrl" type="text" autocomplete="off" placeholder="https://…/v1 或完整 …/chat/completions" />
             <label for="llmModel">Model</label>
-            <input id="llmModel" type="text" autocomplete="off" placeholder="模型名" />
+            <input id="llmModel" type="text" list="llmModelSuggestions" autocomplete="off" placeholder="模型名，千问如 qwen-plus / qwen-turbo" />
+            <datalist id="llmModelSuggestions"></datalist>
             <label for="llmApiKey">API Key</label>
             <input id="llmApiKey" type="password" autocomplete="new-password" placeholder="已保存则留空不修改" />
             <div class="model-actions">
@@ -457,8 +459,33 @@
   <script>
     const AGNES_DEFAULT_URL = 'https://apihub.agnes-ai.com/v1/chat/completions';
     const AGNES_DEFAULT_MODEL = 'agnes-2.0-flash';
+    const QIANWEN_DEFAULT_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+    const QIANWEN_DEFAULT_MODEL = 'qwen-plus';
+    const QIANWEN_MODEL_OPTIONS = ['qwen-turbo', 'qwen-plus', 'qwen-flash', 'qwen3.7-plus'];
     let modelFormTouched = false;
     let knownLlmPresets = null;
+
+    function normalizeLlmProvider(raw) {
+      const p = String(raw || '').toLowerCase();
+      if (p === 'openai-compatible' || p === 'custom') return 'custom';
+      if (p === 'dashscope' || p === 'qianwen') return 'qianwen';
+      if (p === 'openclaw') return 'openclaw';
+      return 'agnes';
+    }
+
+    function refreshLlmModelSuggestions(provider) {
+      const list = document.getElementById('llmModelSuggestions');
+      if (!list) return;
+      list.innerHTML = '';
+      const models = provider === 'qianwen'
+        ? (knownLlmPresets?.qianwen?.models || QIANWEN_MODEL_OPTIONS)
+        : [];
+      for (const name of models) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        list.appendChild(opt);
+      }
+    }
 
     function setDot(id, state) {
       const el = document.getElementById(id);
@@ -486,14 +513,16 @@
       const baseEl = document.getElementById('llmBaseUrl');
       const modelEl = document.getElementById('llmModel');
       const keyEl = document.getElementById('llmApiKey');
+      const provider = normalizeLlmProvider(llm.provider);
       if (providerEl && document.activeElement !== providerEl)
-        providerEl.value = (llm.provider === 'custom' || llm.provider === 'openai-compatible') ? 'custom' : 'agnes';
+        providerEl.value = provider === 'openclaw' ? 'agnes' : provider;
       if (baseEl && document.activeElement !== baseEl)
         baseEl.value = llm.baseUrl || '';
       if (modelEl && document.activeElement !== modelEl)
         modelEl.value = llm.model || '';
       if (keyEl && document.activeElement !== keyEl)
         keyEl.placeholder = llm.hasApiKey ? ('已保存 ' + (llm.apiKeyMasked || '') + '，留空不修改') : '请输入 API Key';
+      refreshLlmModelSuggestions(providerEl?.value || provider);
 
       const embBase = document.getElementById('embBaseUrl');
       const embModel = document.getElementById('embModel');
@@ -510,12 +539,19 @@
       const provider = document.getElementById('llmProvider')?.value || 'agnes';
       const baseEl = document.getElementById('llmBaseUrl');
       const modelEl = document.getElementById('llmModel');
+      // 切换提供商时直接写入对应默认值，方便对比 Agnes / 千问延迟
       if (provider === 'agnes') {
-        if (baseEl && !baseEl.value.trim())
+        if (baseEl)
           baseEl.value = (knownLlmPresets?.agnes?.baseUrl) || AGNES_DEFAULT_URL;
-        if (modelEl && !modelEl.value.trim())
+        if (modelEl)
           modelEl.value = (knownLlmPresets?.agnes?.model) || AGNES_DEFAULT_MODEL;
+      } else if (provider === 'qianwen') {
+        if (baseEl)
+          baseEl.value = (knownLlmPresets?.qianwen?.baseUrl) || QIANWEN_DEFAULT_URL;
+        if (modelEl)
+          modelEl.value = (knownLlmPresets?.qianwen?.model) || QIANWEN_DEFAULT_MODEL;
       }
+      refreshLlmModelSuggestions(provider);
     }
 
     function fillAllowlistInputs(data) {

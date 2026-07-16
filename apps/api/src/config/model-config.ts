@@ -20,6 +20,15 @@ const envFilePath = resolve(runtimeRoot, '.env');
 
 export const AGNES_DEFAULT_CHAT_URL = 'https://apihub.agnes-ai.com/v1/chat/completions';
 export const AGNES_DEFAULT_MODEL = 'agnes-2.0-flash';
+/** 千问云 OpenAI 兼容模式，见 https://platform.qianwenai.com/docs/developer-guides/getting-started/first-api-call */
+export const QIANWEN_DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+export const QIANWEN_DEFAULT_MODEL = 'qwen-plus';
+export const QIANWEN_MODEL_OPTIONS = [
+    'qwen-turbo',
+    'qwen-plus',
+    'qwen-flash',
+    'qwen3.7-plus'
+];
 
 const PLACEHOLDER_KEYS = new Set([
     '',
@@ -28,11 +37,12 @@ const PLACEHOLDER_KEYS = new Set([
     'your_llm_key',
     'your_agenes_key',
     'your_agnes_key',
-    'your_embedding_key'
+    'your_embedding_key',
+    'your_dashscope_key'
 ]);
 
 const llmSchema = z.object({
-    provider: z.enum(['agnes', 'custom', 'openclaw']),
+    provider: z.enum(['agnes', 'qianwen', 'custom', 'openclaw']),
     baseUrl: z.string().optional().default(''),
     apiKey: z.string().optional().default(''),
     model: z.string().optional().default('')
@@ -139,6 +149,16 @@ function envLlmFallback() {
             model: String(env.LLM_CHAT_MODEL || env.OPENCLAW_MODEL || 'openclaw/default')
         };
     }
+    if (raw === 'qianwen' || raw === 'dashscope') {
+        const chatUrl = String(env.LLM_CHAT_URL || '').trim();
+        const base = chatUrl || String(env.LLM_BASE_URL || '').trim() || QIANWEN_DEFAULT_BASE_URL;
+        return {
+            provider: 'qianwen',
+            baseUrl: base,
+            apiKey: String(env.LLM_CHAT_API_KEY || env.LLM_API_KEY || ''),
+            model: String(env.LLM_CHAT_MODEL || env.LLM_MODEL || QIANWEN_DEFAULT_MODEL)
+        };
+    }
     if (raw === 'openai-compatible' || raw === 'custom') {
         const chatUrl = String(env.LLM_CHAT_URL || '').trim();
         const base = chatUrl || String(env.LLM_BASE_URL || '').trim();
@@ -180,7 +200,9 @@ async function ensureBootstrapped() {
 export async function getActiveLlmTarget() {
     await ensureBootstrapped();
     const stored = memoryOverride?.llm || envLlmFallback();
-    const provider = stored.provider === 'openai-compatible' ? 'custom' : stored.provider;
+    const providerRaw = stored.provider === 'openai-compatible' ? 'custom'
+        : (stored.provider === 'dashscope' ? 'qianwen' : stored.provider);
+    const provider = providerRaw;
     let baseUrl = String(stored.baseUrl || '').trim();
     let model = String(stored.model || '').trim();
     const apiKey = String(stored.apiKey || '').trim();
@@ -188,6 +210,10 @@ export async function getActiveLlmTarget() {
     if (provider === 'agnes') {
         baseUrl = baseUrl || AGNES_DEFAULT_CHAT_URL;
         model = model || AGNES_DEFAULT_MODEL;
+    }
+    if (provider === 'qianwen') {
+        baseUrl = baseUrl || QIANWEN_DEFAULT_BASE_URL;
+        model = model || QIANWEN_DEFAULT_MODEL;
     }
     if (provider === 'openclaw') {
         const endpoint = String(env.OPENCLAW_CHAT_ENDPOINT || '/v1/chat/completions')
@@ -262,6 +288,13 @@ export async function getPublicModelConfig() {
                 baseUrl: AGNES_DEFAULT_CHAT_URL,
                 model: AGNES_DEFAULT_MODEL
             },
+            qianwen: {
+                id: 'qianwen',
+                label: '千问（DashScope）',
+                baseUrl: QIANWEN_DEFAULT_BASE_URL,
+                model: QIANWEN_DEFAULT_MODEL,
+                models: QIANWEN_MODEL_OPTIONS
+            },
             custom: {
                 id: 'custom',
                 label: '自定义（OpenAI 兼容）',
@@ -300,7 +333,7 @@ export async function updateLlmConfig(patch) {
     await ensureBootstrapped();
     const current = await getActiveLlmTarget();
     const parsed = llmSchema.parse({
-        provider: patch?.provider ?? current.provider,
+        provider: patch?.provider === 'dashscope' ? 'qianwen' : (patch?.provider ?? current.provider),
         baseUrl: patch?.baseUrl ?? current.baseUrl,
         apiKey: patch?.apiKey === undefined || patch?.apiKey === null || String(patch.apiKey).trim() === ''
             ? current.apiKey
@@ -312,6 +345,10 @@ export async function updateLlmConfig(patch) {
     if (next.provider === 'agnes') {
         next.baseUrl = String(next.baseUrl || AGNES_DEFAULT_CHAT_URL).trim() || AGNES_DEFAULT_CHAT_URL;
         next.model = String(next.model || AGNES_DEFAULT_MODEL).trim() || AGNES_DEFAULT_MODEL;
+    }
+    if (next.provider === 'qianwen') {
+        next.baseUrl = String(next.baseUrl || QIANWEN_DEFAULT_BASE_URL).trim() || QIANWEN_DEFAULT_BASE_URL;
+        next.model = String(next.model || QIANWEN_DEFAULT_MODEL).trim() || QIANWEN_DEFAULT_MODEL;
     }
     if (next.provider === 'custom' && !String(next.baseUrl || '').trim())
         throw new Error('自定义模式必须填写 Base URL');
@@ -330,10 +367,10 @@ export async function updateLlmConfig(patch) {
     const envProvider = next.provider === 'custom' ? 'openai-compatible' : next.provider;
     const updates = {
         LLM_PROVIDER: envProvider,
-        LLM_BASE_URL: next.provider === 'custom'
+        LLM_BASE_URL: (next.provider === 'custom' || next.provider === 'qianwen')
             ? String(next.baseUrl || '').replace(/\/chat\/completions$/, '')
             : '',
-        LLM_API_KEY: next.provider === 'custom' ? next.apiKey : '',
+        LLM_API_KEY: (next.provider === 'custom' || next.provider === 'qianwen') ? next.apiKey : '',
         LLM_MODEL: next.model
     };
     if (next.provider === 'agnes') {

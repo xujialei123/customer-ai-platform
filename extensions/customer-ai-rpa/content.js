@@ -1,24 +1,64 @@
 /**
  * @file extensions/customer-ai-rpa/content.js
  * @module RPA 与 Chrome 插件
- * @description DOM/Shadow DOM 消息采集、未读队列、会话切换、回填和发送。
- * @see 联动关注：平台 DOM 变化与串话防护。
+ * @description 注入经营宝/抖音来客页：扫未读、切会话、上报气泡、回填/点击发送。
+ *   串行锁见 conversationTask；与 background.js、extension-gateway.ts 配合。
+ * @see 联动关注：平台 DOM 变化、expectedMessageId、串话防护。详见 docs/extension-rpa-flow.html
  */
 if (!globalThis.__customerAiRpaInjected) {
 globalThis.__customerAiRpaInjected = true;
+
+// ---------------------------------------------------------------------------
+// 模块级状态（每个注入的 content 环境一份；热重载后由 __customerAiRpaInjected 防重复注入）
+// ---------------------------------------------------------------------------
+
+/** 本页生命周期内已扫过的气泡稳定 id，避免同一 DOM 节点反复上报。 */
 const seenMessages = new Set();
+/** 已成功向 background 提交过的 inbound messageId（含强制重提判断）。 */
 const submittedInboundIds = new Set();
-/** 已提交过的「会话+方向+正文」指纹，防止 ID 抖动时未读角标把旧消息再提一次。 */
+/**
+ * 已提交过的指纹：`${conversationId}:${direction}:${content}`。
+ * 用途：切回话 / messageId 抖动时，同一正文不再二次入库触发重复回复。
+ * 注意：outbound 也会写入同结构（direction=outbound），与 inbound 互不冲突。
+ */
 const submittedInboundContents = new Set();
-/** 抖音同一会话最近一次入站正文，用于吞掉流式残文（「你」→「你好」）和虚拟列表回放。 */
+/**
+ * 抖音「会话 → 最近一次入站正文」。
+ * 用途：classifyDouyinInboundEvolution 吞掉流式残文（「你」→「你好」）和虚拟列表回放。
+ */
 const lastDouyinInboundByConversation = new Map();
+/**
+ * 已完成「初扫」的会话键：`${shopId}:${conversationId}`。
+ * 初扫只把历史气泡记入 seen，不入队，避免打开页面就把整天记录全回一遍。
+ */
 const initializedConversations = new Set();
+/** MutationObserver：DOM 变化后防抖触发 scanMessages。 */
 let observer;
+/** DOM 变更后的短防抖定时器（约 400ms）。 */
 let scanTimer;
+/** 定时全量扫描（约 1.5s），覆盖 iframe 内部静默更新。 */
 let scanInterval;
+/** true = 扩展上下文已失效（重载插件等），观察器/定时器全部停掉。 */
 let contextStopped = false;
+/**
+ * 会话串行任务（同时只服务一个客户，防串话）。
+ * 结构：
+ *   expectedConversationId / expectedCustomerName — 目标客户
+ *   unreadCount — 切入时未读数，用于抖音只取最后 N 条
+ *   phase — switching | waiting-draft | applying-draft
+ *   startedAt — 进入当前 phase 的时间戳
+ * null = 空闲，可调度下一个未读。
+ */
 let conversationTask = null;
+/** 切换会话超时兜底：超时强制清空 conversationTask，避免永久卡死。 */
 let schedulerTimer;
+/**
+ * 上次焦点会话键 `${platform}:${shopId}:${conversationId}`。
+ * 从其他会话切回来时，要检测待回复并优先拉已有草稿发送，而不是当没这回事。
+ */
+let lastFocusedConversationKey = '';
+/** 同一会话草稿找回请求节流，避免 1.5s 扫描狂打网关。 */
+const draftRecoverAtByConversation = new Map();
 
 function stopInvalidExtensionContext() {
   // 扩展重新加载后旧脚本上下文失效，必须停止观察器和定时器，避免持续刷异常。
@@ -31,6 +71,7 @@ function stopInvalidExtensionContext() {
   clearTimeout(schedulerTimer);
 }
 
+/** chrome.runtime.id 是否仍可用；抛错视为已失效。 */
 function isExtensionContextAlive() {
   try {
     return Boolean(chrome.runtime?.id);
@@ -54,6 +95,7 @@ async function safeRuntimeMessage(message) {
   }
 }
 
+/** 收集可搜索根：含 closed Shadow DOM（经营宝聊天常在 shadow 里）。 */
 function getSearchRoots(targetDocument) {
   // 经营宝聊天节点位于封闭 Shadow DOM；Chrome 扩展 API 可读取 closed root，但仍遵守跨域边界。
   const roots = [targetDocument];
@@ -78,6 +120,7 @@ function getSearchRoots(targetDocument) {
   return roots;
 }
 
+/** 在 document + Shadow 根上做 querySelectorAll，返回打平结果。 */
 function queryAllDeep(targetDocument, selector) {
   return getSearchRoots(targetDocument).flatMap((root) => [...root.querySelectorAll(selector)]);
 }
@@ -100,6 +143,7 @@ function getAccessibleDocuments(rootDocument = document) {
   return [...new Set(documents)];
 }
 
+/** 美团等：按子选择器或自身取 trim 后文本。 */
 function textOf(element, selector) {
   return (selector ? element.querySelector(selector)?.textContent : element.textContent)?.trim() ?? '';
 }
@@ -134,17 +178,25 @@ function isDouyinSystemNoticeContent(content) {
     || /^(系统消息|系统提示|平台通知)[:：]?/.test(text);
 }
 
+/**
+ * 生成入库用稳定 messageId。
+ * 美团优先 data-messageid；抖音通常无该属性，改用「会话+方向+出现序号+正文」指纹。
+ * 禁止把 DOM index 写进 id（虚拟列表重排会制造假新消息）。
+ */
 function createStableId(conversationId, direction, content, index, platform, element, occurrence = 1) {
-  // 平台缺少 messageId 时才使用兜底 ID；数据库仍会做第二层去重。
-  if (platform === 'douyin') {
-    const explicit = element?.getAttribute?.('data-messageid') || element?.getAttribute?.('data-message-id');
-    if (explicit)
-      return explicit;
-    // 禁止用 data-index / 「刚刚」等易变时间：虚拟列表重排会让旧气泡变成新 ID，从而重复入队、重复回复。
-    // 同文案连发（如两次「你好」）用当前可见列表中的出现序号区分。
-    return `${conversationId}:${direction}:${occurrence}:${content.slice(0, 120)}`;
-  }
-  return `${conversationId}:${direction}:${index}:${content}`;
+  // 入库用的稳定 messageId。
+  // 抖音来客 DOM 通常没有 messageId / data-msg-id 一类标识码，几乎总走下方指纹。
+  // 美团偶有显式属性时优先用，更稳；没有时同样走指纹。
+  // occurrence：同正文在当前可见列表中的第几次出现（连发两句「你好」要区分）。
+  // index 仅兼容旧调用方，禁止写入 id——虚拟列表重排会让「同一气泡变成新消息」。
+  const explicit = element?.getAttribute?.('data-messageid')
+    || element?.getAttribute?.('data-message-id')
+    || element?.getAttribute?.('data-msg-id')
+    || element?.getAttribute?.('msg-id');
+  if (explicit)
+    return String(explicit);
+  // 指纹：会话 + 方向 + 出现序号 + 正文前 160 字（切回话/回扫仍应相同）
+  return `${conversationId}:${direction}:${occurrence}:${content.slice(0, 160)}`;
 }
 
 /**
@@ -166,6 +218,7 @@ function classifyDouyinInboundEvolution(conversationId, content) {
   return 'continue';
 }
 
+/** 角标文案转未读数；非法或超大数字视为 0（防把账号 ID 当未读）。 */
 function normalizeUnreadCount(raw) {
   const count = Number.parseInt(String(raw ?? '').trim(), 10);
   if (!Number.isFinite(count) || count <= 0 || count > 99)
@@ -181,6 +234,7 @@ function isDouyinPlaceholderName(name) {
     || /douyin/i.test(normalized);
 }
 
+/** 左侧列表选中态卡片上的客户昵称；URL 埋点未就绪时的兜底。 */
 function getDouyinSelectedListCustomerName(targetDocument) {
   const cards = queryAllDeep(targetDocument, '#list-container [class*="contactCard-"]');
   for (const card of cards) {
@@ -197,6 +251,10 @@ function getDouyinSelectedListCustomerName(targetDocument) {
   return '';
 }
 
+/**
+ * 从 URL + DOM 组装抖音 Unified session。
+ * 会话键优先 conGroupId（单顾客）；勿用账号级 groupId/accountId，否则会串会话。
+ */
 function readDouyinSession(targetDocument, settings, targetUrl) {
   const url = new URL(targetUrl);
   const accountId = url.searchParams.get('accountId') || '';
@@ -217,6 +275,7 @@ function readDouyinSession(targetDocument, settings, targetUrl) {
   };
 }
 
+/** 按平台分发：抖音 readDouyinSession / 美团 readMeituanSession。 */
 function readSession(targetDocument, settings, targetUrl) {
   if (settings.platform === 'douyin')
     return readDouyinSession(targetDocument, settings, targetUrl);
@@ -229,6 +288,7 @@ async function resolveSettings(targetUrl) {
   return merged || stored;
 }
 
+/** 当前页是否已进入真实顾客会话（非空白工作台/占位标题）。 */
 function hasRealConversation(session) {
   if (session.platform === 'douyin') {
     if (!/life\.douyin\.com/i.test(session.pageUrl || ''))
@@ -242,6 +302,7 @@ function hasRealConversation(session) {
     && !['经营宝聊天页', '/dzim-workbench-pc/index.html'].includes(session.conversationId);
 }
 
+/** 从经营宝 lx-mv 埋点提取 shopId/userId；禁止用页面标题当生产会话 ID。 */
 function readMeituanSession(targetDocument, settings, targetUrl) {
   // 会话必须从经营宝真实埋点提取 shopId/userId，页面标题不能作为生产会话 ID。
   const userCenter = queryOneDeep(targetDocument, settings.sessionRootSelector || '.user-center[lx-mv]');
@@ -264,6 +325,7 @@ function readMeituanSession(targetDocument, settings, targetUrl) {
   };
 }
 
+/** 选择器自愈用 DOM 快照：只含标签/class/控件语义，不上报聊天正文与客户隐私。 */
 function buildDomSnapshot() {
   // AI 只接收标签、稳定 class 和控件语义，不上传聊天正文、客户 ID、手机号或图片地址。
   const platform = globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(location.href) || 'meituan';
@@ -293,6 +355,7 @@ function buildDomSnapshot() {
   return { platform, nodes, counts: { documents: getAccessibleDocuments().length } };
 }
 
+/** 校验 AI 候选选择器是否唯一命中且方向正确；失败不得覆盖旧配置。 */
 function validateAiSelectors(selectors) {
   // AI 只能给候选；真实页面必须验证方向和唯一命中数量，验证失败不得覆盖旧配置。
   try {
@@ -312,6 +375,7 @@ function validateAiSelectors(selectors) {
   }
 }
 
+/** 元素脱敏外形（tag/classes/白名单属性），供诊断与 AI 选器。 */
 function selectorShape(element) {
   const classes = [...element.classList].filter((name) => /^[a-zA-Z_][\w-]{1,80}$/.test(name)).slice(0, 4);
   const attributes = {};
@@ -323,6 +387,7 @@ function selectorShape(element) {
   return { tag: element.tagName.toLowerCase(), idPresent: Boolean(element.id), classes, attributes };
 }
 
+/** 汇总选择器命中数、未读/白名单/聊天就绪态，供 /guide 与 popup 排障。 */
 function collectDiagnostics(settings, targetDocument) {
   // 诊断数据用于选择器失效排查，属性值按白名单采集并对 lx-mv 做脱敏。
   const classCounts = new Map();
@@ -385,6 +450,7 @@ function collectDiagnostics(settings, targetDocument) {
   };
 }
 
+/** 去空白与 emoji，供抖音昵称模糊匹配。 */
 function normalizeConversationKey(value) {
   return String(value || '')
     .replace(/\s+/g, '')
@@ -409,6 +475,7 @@ function conversationIdsMatch(expected, actual, settings, session) {
   return Boolean(sessionName) && (left.includes(sessionName) || sessionName.includes(left) || right.includes(sessionName) || sessionName.includes(right));
 }
 
+/** 草稿所属 session 与当前页 session 是否对齐（含 shopId）。 */
 function sessionsMatch(expected, current, settings) {
   if (!expected || !current)
     return false;
@@ -425,6 +492,7 @@ function sessionsMatch(expected, current, settings) {
     || conversationIdsMatch(expected.customerName, current.conversationId, settings, current);
 }
 
+/** 当前聊天区是否仍是 conversationTask 锁住的那个客户。 */
 function conversationMatchesTask(session, task, settings) {
   if (!task)
     return false;
@@ -447,6 +515,7 @@ function conversationMatchesTask(session, task, settings) {
   return false;
 }
 
+/** 配置里未读角标选择器拆成数组；去掉 #list-container 前缀以免相对 query 失效。 */
 function unreadSelectorsOf(settings) {
   const raw = settings.conversationUnreadSelector || '.mtd-badge-text.mtd-badge-position';
   return raw.split(',')
@@ -463,6 +532,7 @@ function isDouyinSystemSessionName(name) {
     || /通知$/.test(normalized);
 }
 
+/** 抖音角标兜底读数：只信可见小角标节点，避免大数字账号 ID。 */
 function douyinFallbackUnreadCount(item) {
   // 只在角标节点上读数字，避免把 accountId 等大数字误判为未读数。
   const selectors = '.life-im-pc-badge-text, [class*="badge-number-"], .life-im-pc-badge-sup-show, sup';
@@ -481,6 +551,7 @@ function douyinFallbackUnreadCount(item) {
   return 0;
 }
 
+/** 左侧卡片未读数；仅红点无数字时按 1 处理，避免漏会话。 */
 function unreadCountOf(item, settings) {
   // 平台角标可能只显示红点，也可能显示数字；红点按一条未读处理，避免整条会话永远遗漏。
   for (const selector of unreadSelectorsOf(settings)) {
@@ -520,6 +591,7 @@ function unreadCountOf(item, settings) {
   return 0;
 }
 
+/** 从左侧卡片取会话标识（抖音多为主名 nick，美团多为 data-user-id）。 */
 function conversationIdOf(item, settings) {
   if (settings?.platform === 'douyin') {
     return item.querySelector('[class*="uname-"]')?.textContent?.trim()
@@ -535,6 +607,7 @@ function conversationIdOf(item, settings) {
     || '';
 }
 
+/** 当前中间聊天区客户在左侧卡片上的未读角标数。 */
 function getDouyinCardUnreadCountForSession(targetDocument, settings, session) {
   const card = conversationItemsOf(targetDocument, settings).find((item) => {
     const name = conversationIdOf(item, settings);
@@ -543,12 +616,139 @@ function getDouyinCardUnreadCountForSession(targetDocument, settings, session) {
   return card ? unreadCountOf(card, settings) : 0;
 }
 
+/** 美团：按 userId / conversationId 对齐左侧卡片未读数，供同客户连发时扩大入队窗口。 */
+function getMeituanCardUnreadCountForSession(targetDocument, settings, session) {
+  if (settings?.platform !== 'meituan')
+    return 0;
+  const want = String(session?.conversationId || session?.customerId || '').trim();
+  if (!want)
+    return 0;
+  const card = conversationItemsOf(targetDocument, settings).find((item) => {
+    const id = conversationIdOf(item, settings);
+    return Boolean(id) && (id === want || id.includes(want) || want.includes(id));
+  });
+  return card ? unreadCountOf(card, settings) : 0;
+}
+
+/** 抖音商家侧气泡；选择器失效时多级兜底，避免「待回复尾巴」永远算不准。 */
+function queryDouyinOutboundItems(targetDocument, settings) {
+  const selectors = [
+    settings?.outboundMessageItemSelector,
+    '.chatd-message--right .chatd-bubble-main',
+    '.chatd-message.chatd-message--right',
+    '.chatd-bubble--self',
+    '.chatd-message--right'
+  ].filter(Boolean);
+  for (const selector of selectors) {
+    const items = queryAllDeep(targetDocument, selector)
+      .filter((item) => !item.closest('.chatd-systemMessage') && !item.closest('.dynamic-card-'));
+    if (items.length)
+      return items;
+  }
+  return [];
+}
+
+/**
+ * 统计当前聊天区「最后一条商家气泡之后」还有几条客户消息（待回复尾巴）。
+ * 从其他会话切回来时用它判断要不要拉已有草稿，而不是整页历史重放。
+ */
+function countTrailingUnrepliedInbounds(targetDocument, settings) {
+  const inboundItems = settings.platform === 'douyin'
+    ? queryDouyinMessageItems(targetDocument, settings)
+    : queryAllDeep(targetDocument, settings.messageItemSelector || '');
+  const outboundItems = settings.platform === 'douyin'
+    ? queryDouyinOutboundItems(targetDocument, settings)
+    : queryAllDeep(
+      targetDocument,
+      settings.outboundMessageItemSelector || '.message-cell-container:has(.message-wrapper.right-message .text-message.shop-text)'
+    );
+  if (!inboundItems.length)
+    return 0;
+  // 抖音找不到任何商家气泡时：宁可少找回，也不要把整页历史都算成「待回复」锁死自动切会话。
+  if (settings.platform === 'douyin' && !outboundItems.length)
+    return 0;
+  let lastOutbound = null;
+  for (const item of outboundItems) {
+    if (!lastOutbound)
+      lastOutbound = item;
+    else if (lastOutbound.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING)
+      lastOutbound = item;
+  }
+  let count = 0;
+  for (const item of inboundItems) {
+    if (lastOutbound && !(lastOutbound.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING))
+      continue;
+    const raw = settings.platform === 'douyin' ? textOfDouyinBubble(item) : textOf(item, settings.messageTextSelector);
+    const content = settings.platform === 'douyin' ? stripDouyinTimePrefix(raw) : raw;
+    if (!content)
+      continue;
+    if (settings.platform === 'douyin' && isDouyinSystemNoticeContent(raw))
+      continue;
+    count += 1;
+  }
+  return Math.min(count, 9);
+}
+
+/**
+ * 从其他会话切回 / 仍停在待回复客户：优先让网关把已有 pending 草稿推回来发送。
+ * 不再重新跑一遍 LLM；没有草稿时仍靠后续 processItems 正常入队。
+ */
+function maybeRecoverDraftsOnRefocus(settings, targetDocument, session) {
+  const conversationId = session?.conversationId || '';
+  if (!conversationId || !hasRealConversation(session))
+    return 0;
+  // 调度器已在切往其他未读 / 投递其他客户：绝不能用当前页「待回复」把锁抢回来，
+  // 否则抖音会出现「点了下一个未读，立刻又被当前会话 waiting-draft 钉死」。
+  if (conversationTask && !conversationMatchesTask(session, conversationTask, settings))
+    return 0;
+
+  const focusKey = `${session.platform}:${session.shopId}:${conversationId}`;
+  const cardUnread = settings.platform === 'douyin'
+    ? getDouyinCardUnreadCountForSession(targetDocument, settings, session)
+    : getMeituanCardUnreadCountForSession(targetDocument, settings, session);
+  const trailingUnreplied = countTrailingUnrepliedInbounds(targetDocument, settings);
+  const pendingCount = Math.max(cardUnread, trailingUnreplied);
+  const switchedBack = focusKey !== lastFocusedConversationKey;
+  lastFocusedConversationKey = focusKey;
+  if (pendingCount <= 0)
+    return 0;
+
+  // 同会话持续停留：每 8s 最多找回一次，避免刷网关；切回来必须立刻请求。
+  const now = Date.now();
+  const lastRecoverAt = draftRecoverAtByConversation.get(focusKey) || 0;
+  if (!switchedBack && now - lastRecoverAt < 8000)
+    return pendingCount;
+
+  draftRecoverAtByConversation.set(focusKey, now);
+  // 保留原 startedAt：否则每 8s 刷新 waiting-draft 会让 120s 超时永远到不了，左侧其它未读永远切不过去。
+  const sameTask = conversationTask && conversationMatchesTask(session, conversationTask, settings);
+  const keepPhase = conversationTask?.phase === 'applying-draft' ? 'applying-draft' : 'waiting-draft';
+  conversationTask = {
+    expectedConversationId: conversationId,
+    expectedCustomerName: session.customerName || conversationId,
+    unreadCount: Math.max(pendingCount, conversationTask?.unreadCount || 0, 1),
+    phase: keepPhase,
+    startedAt: sameTask && conversationTask.startedAt ? conversationTask.startedAt : now
+  };
+  setProcessingStatus(`检测到待回复，找回草稿：${session.customerName || conversationId}`);
+  void safeRuntimeMessage({
+    type: 'request_drafts',
+    payload: {
+      ...session,
+      pendingCount,
+      reason: switchedBack ? 'switched_back' : 'still_unreplied'
+    }
+  });
+  return pendingCount;
+}
+
 function getDouyinCenterCustomerName(targetDocument, settings, targetUrl) {
   return getDouyinDomCustomerName(targetDocument, settings)
     || readDouyinSession(targetDocument, settings, targetUrl).customerName
     || '';
 }
 
+/** 左侧会话列表卡片；历史咨询 Tab 返回空，避免误点旧会话。 */
 function conversationItemsOf(targetDocument, settings) {
   if (settings.platform === 'douyin' && isDouyinHistoryTabActive(targetDocument))
     return [];
@@ -559,6 +759,7 @@ function conversationItemsOf(targetDocument, settings) {
     .filter((item, index, all) => item.textContent?.trim() && all.findIndex((candidate) => candidate === item || candidate.contains(item)) === index);
 }
 
+/** 真正可点的会话节点（虚拟列表外层时下钻到内部 item）。 */
 function clickableConversationTarget(item, settings) {
   if (settings?.platform === 'douyin')
     return item.closest('[class*="contactCard-"]') || item;
@@ -575,6 +776,7 @@ function allowedCustomersOf(settings) {
     .filter(Boolean);
 }
 
+/** 白名单为空则放行；否则只处理配置的测试客户。 */
 function isAllowedConversation(settings, session, conversationItem) {
   // 白名单为空时放行全部客户；抖音/美团同一规则，由服务端配置页统一下发。
   const allowedCustomers = allowedCustomersOf(settings);
@@ -591,6 +793,7 @@ function isAllowedConversation(settings, session, conversationItem) {
   return allowedCustomers.some((allowed) => candidates.some((candidate) => candidate === allowed || candidate.includes(allowed)));
 }
 
+/** 写 Mock 页 data-rpa-processing-status；真实平台无节点则静默。 */
 function setProcessingStatus(text) {
   // Mock 页面提供状态占位；真实平台没有该节点时静默跳过，不向经营宝 DOM 注入额外 UI。
   for (const targetDocument of getAccessibleDocuments()) {
@@ -610,6 +813,7 @@ function clearConversationTask(reason) {
     setProcessingStatus(reason);
 }
 
+/** 回填回复到 textarea/contenteditable，并派发 input 事件以驱动 React/框架状态。 */
 function dispatchEditableInput(input, content) {
   if (input.tagName === 'TEXTAREA') {
     const targetDocument = input.ownerDocument;
@@ -650,6 +854,7 @@ function dispatchEditableInput(input, content) {
   targetDocument.dispatchEvent(new Event('selectionchange', { bubbles: true }));
 }
 
+/** 抖音发送按钮是否可点（未 disabled）。 */
 function isDouyinSendButtonReady(targetDocument, settings) {
   const button = resolveSendButton(targetDocument, settings.sendButtonSelector, settings);
   return Boolean(button && !button.disabled && button.getAttribute('aria-disabled') !== 'true');
@@ -666,7 +871,9 @@ async function waitForDouyinSendReady(targetDocument, settings, input, timeoutMs
   return isDouyinSendButtonReady(targetDocument, settings);
 }
 
+/** 草稿处理完且仍锁在该客户时放锁，并延迟触发下一轮扫描。 */
 function releaseConversationTaskAfterDraft(expectedSession, settings, delayMs = 800) {
+  // 草稿已回填/发送完毕：仅当仍锁在「这个客户」上才释放，然后延迟再扫下一个未读。
   if (!conversationTask || !conversationMatchesTask(expectedSession, conversationTask, settings))
     return;
   clearTimeout(schedulerTimer);
@@ -704,6 +911,7 @@ async function attemptAutoSend(input, targetDocument, settings) {
   return { clicked, method: method || (clicked ? 'send-button' : 'none') };
 }
 
+/** 关掉「智能推荐回复」浮层，防止挡住发送钮或抢焦点。 */
 function dismissSmartReplyOverlay(targetDocument) {
   // 经营宝输入后会弹出“智能推荐回复”，可能挡住发送按钮或抢走焦点。
   const labels = Array.from(targetDocument.querySelectorAll('*')).filter((node) => {
@@ -728,6 +936,7 @@ function dismissSmartReplyOverlay(targetDocument) {
   return false;
 }
 
+/** 按平台候选选择器找可点的「发送」按钮。 */
 function resolveSendButton(targetDocument, selector, settings) {
   const preferred = settings?.platform === 'douyin'
     ? [
@@ -752,6 +961,7 @@ function resolveSendButton(targetDocument, selector, settings) {
   return scoped.find((button) => button.tagName === 'BUTTON' && (button.textContent || '').trim() === '发送') || null;
 }
 
+/** 合成 pointer/mouse/click 序列点击发送；disabled 时返回 false。 */
 function clickSendControl(targetDocument, selector, settings) {
   dismissSmartReplyOverlay(targetDocument);
   const button = resolveSendButton(targetDocument, selector, settings);
@@ -786,6 +996,7 @@ function clickSendControl(targetDocument, selector, settings) {
   return true;
 }
 
+/** 对输入框派发 Enter，兼容更认回车的经营宝版本。 */
 function trySubmitByEnter(input) {
   // 部分经营宝版本更认输入框回车，而不是发送按钮的合成点击。
   const view = input.ownerDocument.defaultView;
@@ -802,6 +1013,7 @@ function trySubmitByEnter(input) {
   }
 }
 
+/** 点击左侧会话卡片（合成 pointer 事件，与人工点击一致）。 */
 function clickConversationItem(item, settings) {
   const target = clickableConversationTarget(item, settings);
   const view = target.ownerDocument.defaultView;
@@ -829,6 +1041,7 @@ function clickConversationItem(item, settings) {
     target.click();
 }
 
+/** 按可见文案找抖音「当前咨询/历史咨询」Tab。 */
 function findDouyinTabByLabel(targetDocument, label) {
   return queryAllDeep(targetDocument, '[role="tab"], button, div, span, a')
     .find((element) => element.textContent?.trim() === label
@@ -848,6 +1061,7 @@ function isDouyinTabSelected(element) {
   return false;
 }
 
+/** 返回 history | current；无法判断时默认 current，避免整页误停。 */
 function getDouyinListTabMode(targetDocument) {
   const historyTab = findDouyinTabByLabel(targetDocument, '历史咨询');
   const currentTab = findDouyinTabByLabel(targetDocument, '当前咨询');
@@ -859,6 +1073,7 @@ function getDouyinListTabMode(targetDocument) {
   return 'current';
 }
 
+/** 是否停在「历史咨询」——该 Tab 禁止自动回复与切会话。 */
 function isDouyinHistoryTabActive(targetDocument) {
   return getDouyinListTabMode(targetDocument) === 'history';
 }
@@ -873,6 +1088,7 @@ function isDouyinChatClosed(targetDocument) {
     || Boolean(queryOneDeep(targetDocument, '[class*="disabledTextarea-"], textarea[class*="disabled"]'));
 }
 
+/** 聊天区是否仍在 loading；侧栏隐藏 loading 不当作阻塞。 */
 function isDouyinChatLoading(targetDocument) {
   // 只认聊天区内可见的 loading；侧栏隐藏节点会导致永远 chatReady=false。
   const loaders = queryAllDeep(targetDocument, '.life-im-pc-loading, .life-im-pc-loading-block, [class*="loading-block"]');
@@ -886,6 +1102,7 @@ function isDouyinChatLoading(targetDocument) {
   return Boolean(visibleLoader) && !queryDouyinReplyInput(targetDocument, { platform: 'douyin' });
 }
 
+/** 只从顶部/选中卡读真实昵称，禁止用 task 猜测以免误判已对准。 */
 function getDouyinDomCustomerName(targetDocument, settings) {
   // 只读页面真实顶部/选中态，禁止用 conversationTask 猜测，否则会误判“已在目标会话”。
   const selectors = [
@@ -904,6 +1121,7 @@ function getDouyinDomCustomerName(targetDocument, settings) {
   return '';
 }
 
+/** DOM 昵称优先；短暂读空时才用 task.expectedCustomerName 兜底。 */
 function resolveDouyinCustomerName(targetDocument, settings) {
   return getDouyinDomCustomerName(targetDocument, settings)
     || (conversationTask?.expectedCustomerName && !isDouyinPlaceholderName(conversationTask.expectedCustomerName)
@@ -929,6 +1147,7 @@ function queryDouyinReplyInput(targetDocument, settings) {
   return null;
 }
 
+/** 抖音客户侧气泡列表；过滤系统消息与动态卡片。 */
 function queryDouyinMessageItems(targetDocument, settings) {
   const selectors = [
     settings?.messageItemSelector,
@@ -945,6 +1164,7 @@ function queryDouyinMessageItems(targetDocument, settings) {
   return [];
 }
 
+/** 中间聊天区可交互（有输入框或已有气泡，且非 loading/关闭）。 */
 function isDouyinChatReady(targetDocument, settings) {
   if (isDouyinChatClosed(targetDocument))
     return false;
@@ -958,6 +1178,7 @@ function isDouyinChatReady(targetDocument, settings) {
   return hasInput || hasMessages;
 }
 
+/** 回复输入框是否可用（抖音额外校验会话未关闭）。 */
 function isReplyReady(targetDocument, settings) {
   if (settings?.platform === 'douyin') {
     if (isDouyinChatClosed(targetDocument))
@@ -972,10 +1193,13 @@ function isReplyReady(targetDocument, settings) {
   return true;
 }
 
+/** 输入框已有未发送草稿时暂缓切未读，避免冲掉人工编辑。 */
 function shouldDeferSwitch(targetDocument, settings) {
   if (!isReplyReady(targetDocument, settings))
     return false;
-  const input = queryOneDeep(targetDocument, settings.replyInputSelector);
+  const input = settings.platform === 'douyin'
+    ? queryDouyinReplyInput(targetDocument, settings)
+    : queryOneDeep(targetDocument, settings.replyInputSelector);
   return Boolean(input?.textContent?.trim() || input?.value?.trim());
 }
 
@@ -989,6 +1213,10 @@ function findConversationItemByHint(targetDocument, settings, hint) {
   }) || null;
 }
 
+/**
+ * 是否需要离开当前页去点某个未读。
+ * 抖音：聊天未就绪、系统会话、角标客户≠中间客户时返回目标卡片。
+ */
 function shouldSwitchToUnread(targetDocument, settings) {
   const unreadItem = findUnreadConversationItem(targetDocument, settings);
   const targetUrl = targetDocument.location?.href || location.href;
@@ -1029,6 +1257,7 @@ function shouldSwitchToUnread(targetDocument, settings) {
   return null;
 }
 
+/** 点抖音左侧卡，并通知 background 可能需要主世界辅助点击。 */
 async function clickDouyinConversationItem(item, nameHint) {
   const card = item.closest('[class*="contactCard-"]') || item;
   const hint = nameHint || conversationIdOf(card, { platform: 'douyin' });
@@ -1037,6 +1266,7 @@ async function clickDouyinConversationItem(item, nameHint) {
 }
 
 function beginConversationSwitch(settings, item, hint, options = {}) {
+  // 从左侧未读卡片点进某会话时建立串行任务；waitDraft=true 表示切过去就进入「等 AI」。
   const expectedConversationId = settings.platform === 'meituan'
     ? (conversationIdOf(item, settings) || hint || '')
     : (conversationIdOf(item, settings) || hint || '');
@@ -1044,21 +1274,27 @@ function beginConversationSwitch(settings, item, hint, options = {}) {
     ? (item.querySelector('.userinfo-name-show, [class*="name"]')?.textContent?.trim() || '')
     : '';
   conversationTask = {
+    /** 目标会话 id（美团多为 userId；抖音多为昵称卡片文案） */
     expectedConversationId,
+    /** 目标客户展示名，抖音匹配优先靠它 */
     expectedCustomerName: settings.platform === 'douyin'
       ? (conversationIdOf(item, settings) || hint || '')
       : (meituanName || undefined),
+    /** 切入时看到的未读数，扫描时只取末尾若干条 inbound */
     unreadCount: unreadCountOf(item, settings) || 1,
+    /** switching=正在点开会话；waiting-draft=等草稿；applying-draft=草稿正在回填/发送 */
     phase: options.waitDraft ? 'waiting-draft' : 'switching',
     startedAt: Date.now()
   };
   clearTimeout(schedulerTimer);
+  // 硬超时：极端情况下释放锁，避免整页永久不切换。
   schedulerTimer = setTimeout(() => {
     if (conversationTask?.startedAt && Date.now() - conversationTask.startedAt >= 120000)
       conversationTask = null;
   }, 121000);
 }
 
+/** 美团：输入框空闲时切到第一个白名单未读，并进入等草稿。 */
 function scheduleMeituanUnreadConversation(settings, targetDocument) {
   const input = settings.replyInputSelector ? queryOneDeep(targetDocument, settings.replyInputSelector) : null;
   if (input?.textContent?.trim() || input?.value?.trim())
@@ -1071,6 +1307,7 @@ function scheduleMeituanUnreadConversation(settings, targetDocument) {
   return true;
 }
 
+/** 抖音：在「当前咨询」下按 shouldSwitchToUnread 切未读并 waitDraft。 */
 function scheduleDouyinUnreadConversation(settings, targetDocument) {
   if (isDouyinHistoryTabActive(targetDocument))
     return false;
@@ -1083,6 +1320,7 @@ function scheduleDouyinUnreadConversation(settings, targetDocument) {
   return true;
 }
 
+/** 定位卡片 → beginConversationSwitch → 平台点击；成功返回 true。 */
 function switchToConversation(settings, targetDocument, hint, options = {}) {
   const item = findConversationItemByHint(targetDocument, settings, hint)
     || findUnreadConversationItem(targetDocument, settings);
@@ -1097,6 +1335,7 @@ function switchToConversation(settings, targetDocument, hint, options = {}) {
   return true;
 }
 
+/** Promise 版延时，供切会话轮询使用。 */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1108,6 +1347,7 @@ function findSessionDocument(settings, expectedSession) {
   }) || null;
 }
 
+/** 第一个白名单未读卡片；抖音跳过系统通知会话。 */
 function findUnreadConversationItem(targetDocument, settings) {
   const unreadItems = conversationItemsOf(targetDocument, settings)
     .filter((item) => unreadCountOf(item, settings) > 0 && isAllowedConversation(settings, null, item));
@@ -1120,6 +1360,10 @@ function findUnreadConversationItem(targetDocument, settings) {
   return unreadItems[0];
 }
 
+/**
+ * 未读调度入口：严格串行。
+ * applying/waiting 期间禁止抢切；空闲才按平台 schedule*Unread。
+ */
 function scheduleUnreadConversation(settings, targetDocument = document) {
   // 调度器严格串行：当前草稿尚未回填/发送完成时，禁止因其他未读抢切，否则 AI 慢时会丢当前会话。
   if (!settings?.autoSwitchConversations)
@@ -1175,7 +1419,12 @@ function scheduleUnreadConversation(settings, targetDocument = document) {
   }
 }
 
+/**
+ * 主循环：诊断上报 → 未读调度 → 读当前会话气泡 → inbound/outbound 入队。
+ * 每会话初扫只记 seen 不入队，避免历史轰炸。
+ */
 async function scanMessages() {
+  // 主循环：诊断 → 未读调度 → 读当前会话气泡 → 上报 inbound/outbound。
   if (!isExtensionContextAlive()) {
     stopInvalidExtensionContext();
     return;
@@ -1211,6 +1460,7 @@ async function scanMessages() {
     scheduleUnreadConversation(settings, targetDocument);
     if (!settings.messageItemSelector)
       continue;
+    // session：当前聊天区身份（shopId / conversationId / customerName），上报与匹配锁都靠它。
     const session = readSession(targetDocument, settings, targetUrl);
     const conversationId = session.conversationId;
     const customerId = session.customerId;
@@ -1249,24 +1499,37 @@ async function scanMessages() {
       continue;
     }
     void safeRuntimeMessage({ type: 'session', payload: session });
+    // 从其他会话切回「待回复」客户：有 pending 草稿则直接找回发送，不重新生成。
+    const recoveredPending = maybeRecoverDraftsOnRefocus(settings, targetDocument, session);
+    // isInitialConversationScan：本会话第一次扫到 → 历史只记 seen；未读窗口内的末尾 N 条仍要入队。
     const isInitialConversationScan = !initializedConversations.has(`${session.shopId}:${conversationId}`);
+    // scheduledUnreadCount：切入时未读角标 / 任务上的条数（美团、抖音都用）。
     let scheduledUnreadCount = conversationTask && conversationMatchesTask(session, conversationTask, settings)
       ? conversationTask.unreadCount : 0;
     const cardUnreadCount = settings.platform === 'douyin'
       ? getDouyinCardUnreadCountForSession(targetDocument, settings, session)
-      : 0;
-    if (settings.platform === 'douyin' && cardUnreadCount > scheduledUnreadCount)
+      : getMeituanCardUnreadCountForSession(targetDocument, settings, session);
+    if (cardUnreadCount > scheduledUnreadCount)
       scheduledUnreadCount = cardUnreadCount;
+    if (recoveredPending > scheduledUnreadCount)
+      scheduledUnreadCount = recoveredPending;
     scheduledUnreadCount = Math.min(Math.max(0, scheduledUnreadCount), 9);
     let inboundSent = 0;
     const processItems = (items, direction, textSelector) => {
-      // 抖音：自动扫描阶段只关心最后 N 条（未读数），绝不把历史气泡当新消息连发。
-      // 初次扫描仍会整页写入 seenMessages，只是不入队。
+      // direction: inbound=客户气泡 / outbound=商家气泡
+      // 美团：整页可见气泡都扫，靠 seen/submitted 去重。
+      // 抖音：冷切入未读仍只取末尾 N 条防历史轰炸；已服务该客户时全量扫，避免连发中间句丢失。
       let workItems = items;
       if (settings.platform === 'douyin' && direction === 'inbound' && !isInitialConversationScan) {
-        const take = Math.max(1, scheduledUnreadCount || 1);
-        workItems = items.slice(-take);
+        const servingThisConversation = Boolean(
+          conversationTask && conversationMatchesTask(session, conversationTask, settings)
+        );
+        if (!servingThisConversation) {
+          const take = Math.max(1, scheduledUnreadCount || 1);
+          workItems = items.slice(-take);
+        }
       }
+      // contentOccurrence：同一正文在本轮列表里出现第几次，供稳定 id 区分连发相同句子。
       const contentOccurrence = new Map();
       workItems.forEach((item, index) => {
         const rawContent = settings.platform === 'douyin'
@@ -1289,40 +1552,40 @@ async function scanMessages() {
         contentOccurrence.set(content, occurrence);
         // occurrence 对整页 items 计数；切片后 index 不代表全局位置，改用以 0 起的 work index。
         const id = createStableId(conversationId, direction, content, index, settings.platform, item, occurrence);
-        const contentKey = settings.platform === 'douyin'
-          ? `${conversationId}:${direction}:${content}`
-          : null;
+        // 美团/抖音都用「会话+方向+正文」防切回话重扫二次入库；抖音再叠系统提示清洗。
+        const contentKey = `${conversationId}:${direction}:${content}`;
         // 系统进线提示不是客户提问：只记 seen，切会话也不触发 RAG/欢迎语。
         if (settings.platform === 'douyin' && direction === 'inbound' && isDouyinSystemNoticeContent(rawContent)) {
           seenMessages.add(id);
           submittedInboundIds.add(id);
-          if (contentKey)
-            submittedInboundContents.add(contentKey);
+          submittedInboundContents.add(contentKey);
           return;
         }
-        const isTriggerUnread = direction === 'inbound' && scheduledUnreadCount > 0 && index === workItems.length - 1;
-        // 未读角标常在回复后残留；只有「同正文从未提交过」才允许强制重提，避免旧消息换 ID 后二次回复。
-        const forceUnreadResubmit = isTriggerUnread
+        // 初扫/未读窗口：放行「从末尾数起的第 1..N 条」，不能只放行最后 1 条，
+        // 否则美团/抖音同客户连发 3 句未读时中间句会被永久记成 seen。
+        const fromEnd = workItems.length - index;
+        const withinUnreadWindow = direction === 'inbound'
+          && scheduledUnreadCount > 0
+          && fromEnd <= scheduledUnreadCount;
+        const forceUnreadResubmit = withinUnreadWindow
           && cardUnreadCount > 0
           && !submittedInboundIds.has(id)
-          && !(contentKey && submittedInboundContents.has(contentKey));
+          && !submittedInboundContents.has(contentKey);
         if (seenMessages.has(id) && !forceUnreadResubmit)
           return;
         if (direction === 'inbound' && settings.platform === 'douyin'
           && classifyDouyinInboundEvolution(conversationId, content) === 'skip') {
           seenMessages.add(id);
           submittedInboundIds.add(id);
-          if (contentKey)
-            submittedInboundContents.add(contentKey);
+          submittedInboundContents.add(contentKey);
           return;
         }
-        // 同正文已成功入过队（例如切回话前已恢复过），角标残留也不再二次入库。
-        if (settings.platform === 'douyin' && contentKey && submittedInboundContents.has(contentKey)
-          && !forceUnreadResubmit) {
+        // 同正文已成功入过队（切回话回扫尤为常见），不再二次入库触发重复回复。
+        if (direction === 'inbound' && submittedInboundContents.has(contentKey) && !forceUnreadResubmit) {
           seenMessages.add(id);
           return;
         }
-        if (isInitialConversationScan && !isTriggerUnread) {
+        if (isInitialConversationScan && !withinUnreadWindow) {
           seenMessages.add(id);
           return;
         }
@@ -1330,8 +1593,7 @@ async function scanMessages() {
         if (direction === 'inbound') {
           inboundSent += 1;
           submittedInboundIds.add(id);
-          if (contentKey)
-            submittedInboundContents.add(contentKey);
+          submittedInboundContents.add(contentKey);
           if (settings.platform === 'douyin')
             lastDouyinInboundByConversation.set(conversationId, content);
           conversationTask = conversationTask || {
@@ -1343,6 +1605,8 @@ async function scanMessages() {
           };
           setProcessingStatus(`AI 正在处理：${session.customerName || conversationId}`);
         }
+        if (direction === 'outbound')
+          submittedInboundContents.add(contentKey);
         void safeRuntimeMessage({
           type: direction,
           requestId: crypto.randomUUID(),
@@ -1363,13 +1627,23 @@ async function scanMessages() {
     processItems(messageItems, 'inbound', settings.messageTextSelector);
     processItems(outboundItems, 'outbound', settings.outboundMessageTextSelector || '.text-message.shop-text');
     initializedConversations.add(`${session.shopId}:${conversationId}`);
-    if (conversationTask && conversationMatchesTask(session, conversationTask, settings) && inboundSent > 0)
+    if (conversationTask && conversationMatchesTask(session, conversationTask, settings) && inboundSent > 0) {
+      // 同客户又来了新问：续上等草稿，并把等待时钟重置，避免上一问还没回就把锁放掉。
       conversationTask.phase = 'waiting-draft';
+      conversationTask.startedAt = Date.now();
+      conversationTask.unreadCount = Math.max(conversationTask.unreadCount || 1, scheduledUnreadCount || 1, inboundSent);
+    }
     scheduleUnreadConversation(settings, targetDocument);
   }
 }
 
+/**
+ * 网关推来的草稿：强制切到对应会话 → 回填 → 条件满足则自动发送。
+ * 回报 draft_send_result 给 background/网关。
+ */
 async function applyDraft(draft, expectedSession) {
+  // draft：网关推来的回复草稿（content / allowAutoSend / riskLevel / userMessage / id）
+  // expectedSession：草稿所属会话，用于强制切回话，避免填到别的客户。
   const settings = expectedSession?.platform
     ? await resolveSettings(expectedSession.pageUrl || location.href)
     : await resolveSettings(location.href);
@@ -1456,8 +1730,57 @@ async function applyDraft(draft, expectedSession) {
     setTimeout(scanMessages, 500);
     return;
   }
+
+  // 切回话后草稿可能再次下发：仅当「本轮客户提问之后」已有同文商家气泡才跳过，
+  // 否则超时兜底话术句句相同，会误判历史旧回复导致新问题完全不发。
+  if (pageAlreadyHasOutboundContent(targetDocument, settings, draft.content, draft.userMessage)) {
+    setProcessingStatus(`已发送过，跳过重复回复：${expectedSession?.customerName || expectedSession?.conversationId || ''}`);
+    void safeRuntimeMessage({
+      type: 'draft_send_result',
+      payload: {
+        platform: expectedSession?.platform,
+        shopId: expectedSession?.shopId,
+        conversationId: expectedSession?.conversationId,
+        customerId: expectedSession?.customerId,
+        customerName: expectedSession?.customerName,
+        draftId: draft.id,
+        riskLevel: draft.riskLevel,
+        allowAutoSend: false,
+        denyReason: 'already_on_page',
+        clicked: true,
+        filledOnly: false,
+        method: 'page-already-has-outbound',
+        content: draft.content
+      }
+    });
+    releaseConversationTaskAfterDraft(expectedSession, settings, 400);
+    return;
+  }
+
   const canAutoSend = settings.autoSend && draft.allowAutoSend && draft.riskLevel === 'low' && settings.sendButtonSelector;
-  dispatchEditableInput(input, draft.content);
+  // canAutoSend：弹窗开关 ∩ 服务端授权 ∩ low 风险 ∩ 有发送按钮选择器。
+  // 拒收「微信/QQ」、并洗掉「美团还是抖音」跨平台追问（服务端旧草稿也可能带这类句子）。
+  let sendContent = String(draft.content ?? '')
+    .replace(/随时\s*(用)?\s*(微信|威信|vx|v信)\s*(跟|和)?\s*我说/gi, '随时在本对话跟我说')
+    .replace(/加\s*(我|个|一下)?\s*(的)?\s*(微信|威信|vx|v信|微信号)/gi, '在本对话联系我')
+    .replace(/微信号|威信号/g, '联系方式')
+    .replace(/微信|威信|v信/gi, '本对话')
+    .replace(/\b(wechat)\b/gi, '本对话')
+    .replace(/\bvx\b/gi, '本对话')
+    .replace(/扣扣\s*号?|\bqq\b/gi, '本对话')
+    .replace(/本对话本对话/g, '本对话');
+  if (settings.platform === 'douyin' || settings.platform === 'meituan') {
+    sendContent = sendContent
+      .replace(/[，,]?\s*方便告诉我您是在美团还是抖音买的吗[？?]?\s*/g, '。方便的话把订单号或订单截图发在本对话，我帮您查。')
+      .replace(/[，,]?\s*您是在美团还是抖音(上|买的)?吗[？?]?\s*/g, '。')
+      .replace(/[，,]?\s*(是在)?美团还是抖音[？?]?\s*/g, '。')
+      .replace(/[，,]?\s*您是在抖音还是美团(上|买的)?吗[？?]?\s*/g, '。')
+      .replace(/[，,]?\s*(是在)?抖音还是美团[？?]?\s*/g, '。')
+      .replace(/。{2,}/g, '。')
+      .replace(/^[。，,\s]+/, '');
+  }
+  sendContent = sendContent.trim() || String(draft.content ?? '');
+  dispatchEditableInput(input, sendContent);
   if (settings.platform === 'douyin')
     await waitForDouyinSendReady(targetDocument, settings, input, 3500);
   // 自动发送必须同时满足扩展开关和服务端安全环境变量；默认永远只回填供人工确认。
@@ -1518,6 +1841,58 @@ async function applyDraft(draft, expectedSession) {
   }
 }
 
+/**
+ * 本轮客户提问之后，是否已有与草稿同文的商家气泡。
+ * 必须锚定「当前问题」之后：超时兜底话术常年复用同一句，扫全历史会误杀导致新问题彻底不发。
+ */
+function pageAlreadyHasOutboundContent(targetDocument, settings, draftContent, userMessage) {
+  const expected = String(draftContent ?? '').trim();
+  if (!expected)
+    return false;
+  const inboundItems = settings.platform === 'douyin'
+    ? queryDouyinMessageItems(targetDocument, settings)
+    : queryAllDeep(targetDocument, settings.messageItemSelector || '');
+  const outboundItems = queryAllDeep(
+    targetDocument,
+    settings.outboundMessageItemSelector || '.message-cell-container:has(.message-wrapper.right-message .text-message.shop-text)'
+  );
+  const inboundTextOf = (item) => {
+    if (settings.platform === 'douyin')
+      return stripDouyinTimePrefix(textOfDouyinBubble(item));
+    return textOf(item, settings.messageTextSelector);
+  };
+  const outboundTextOf = (item) => {
+    if (settings.platform === 'douyin')
+      return stripDouyinTimePrefix(textOfDouyinBubble(item));
+    return textOf(item, settings.outboundMessageTextSelector || '.text-message.shop-text');
+  };
+
+  let anchor = null;
+  const wantUser = String(userMessage ?? '').trim();
+  if (wantUser && inboundItems.length) {
+    for (let i = inboundItems.length - 1; i >= 0; i -= 1) {
+      const text = String(inboundTextOf(inboundItems[i]) ?? '').trim();
+      if (!text)
+        continue;
+      if (text === wantUser || text.includes(wantUser) || wantUser.includes(text)) {
+        anchor = inboundItems[i];
+        break;
+      }
+    }
+  }
+  if (!anchor && inboundItems.length)
+    anchor = inboundItems[inboundItems.length - 1];
+
+  for (const item of outboundItems) {
+    // 只认锚点客户消息之后出现的商家气泡，忽略更早的历史同文。
+    if (anchor && !(anchor.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING))
+      continue;
+    if (String(outboundTextOf(item) ?? '').trim() === expected)
+      return true;
+  }
+  return false;
+}
+
 /** 草稿到位：锁定 applying-draft，强制切到 draft.session 对应会话后再返回文档。 */
 async function ensureConversationForDraft(settings, expectedSession) {
   const hint = expectedSession?.customerName
@@ -1576,7 +1951,11 @@ async function ensureConversationForDraft(settings, expectedSession) {
   return findSessionDocument(settings, expectedSession);
 }
 
+// ---------------------------------------------------------------------------
+// background ↔ content：草稿投递、强制重扫、选择器诊断
+// ---------------------------------------------------------------------------
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // applyDraft：网关经 background 推来的回复；rescan：手动/诊断触发全量扫。
   if (message.type === 'applyDraft')
     void applyDraft(message.payload, message.session);
   if (message.type === 'rescan')
@@ -1591,6 +1970,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
+// DOM 一变就防抖扫；间隔扫兜底 iframe 内静默更新（父文档可能无 mutation）。
 observer = new MutationObserver(() => {
   if (!isExtensionContextAlive()) {
     stopInvalidExtensionContext();
@@ -1600,10 +1980,10 @@ observer = new MutationObserver(() => {
   scanTimer = setTimeout(scanMessages, 400);
 });
 observer.observe(document.documentElement, { childList: true, subtree: true });
-// 平台可能在父文档不变的情况下更新 iframe 内部 DOM，定时扫描用于覆盖这种变化。
 scanInterval = setInterval(scanMessages, 1500);
 void scanMessages();
 void (async function bootstrapDiagnostics() {
+  // 注入后立刻上报一次，方便 /guide 看选择器是否命中、是否开了自动切会话。
   const platform = globalThis.__customerAiPlatformProfiles?.detectPlatformFromUrl(location.href);
   if (!platform)
     return;

@@ -83,9 +83,16 @@ export class MessageService {
             orderBy: { createdAt: 'desc' }
         });
         const ageMs = Date.now() - new Date(recent.createdAt).getTime();
-        if (draft?.status === 'sent' || draft?.status === 'dispatching') {
-            // 刚发出/正在点发送：短窗口内同文多半是页面回扫气泡，不是客户再问一次。
-            if (ageMs >= 0 && ageMs < 90 * 1000)
+        if (draft?.status === 'sent') {
+            // 已确认发出：长窗口内同文多半是切回话回扫，不是客户再问一次。
+            if (ageMs >= 0 && ageMs < 6 * 60 * 60 * 1000)
+                return recent;
+            return null;
+        }
+        if (draft?.status === 'dispatching') {
+            // 仅「刚点发送、等页面确认」短防抖。若误报 already_on_page 却从未发出，
+            // 超过 2 分钟必须放行，否则同一句客户问题会被卡死数小时。
+            if (ageMs >= 0 && ageMs < 2 * 60 * 1000)
                 return recent;
             return null;
         }

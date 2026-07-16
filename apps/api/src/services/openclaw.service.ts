@@ -7,7 +7,7 @@
  */
 import { env } from '../config/env.js';
 import { getActiveLlmTarget } from '../config/model-config.js';
-import { isCasualCustomerMessage } from './safety.service.js';
+import { isCasualCustomerMessage, platformChannelLabel, sanitizePlatformOutboundText } from './safety.service.js';
 import { z } from 'zod';
 const orderActionSchema = z.object({
     action: z.enum(['query_order_by_no', 'query_orders_by_phone', 'handoff', 'none']),
@@ -117,6 +117,7 @@ function rewriteKbSnippetForCustomer(raw) {
 /**
  * 粗筛：检索片段是否像在答当前客户问题。
  * 避免「套餐都有哪些」却命中「团购券可以叠加」后，兜底把无关 FAQ 原文发出去。
+ * 用 overlapping 二字/三字词，忌贪婪整句匹配（「你这里还能开电子发票嘛」会合成超长词永远对不上语料）。
  */
 function isRagSnippetRelevant(query, snippet) {
     const q = String(query ?? '').replace(/\s+/g, '');
@@ -133,21 +134,36 @@ function isRagSnippetRelevant(query, snippet) {
         && /叠加|核销一次|是否可以叠加/.test(corpus)
         && !/(价目|报价|单价|套餐列表|包含项目|参考价)/.test(corpus))
         return false;
-    const stop = new Set(['可以', '什么', '怎么', '如何', '请问', '一下', '这个', '那个', '门店', '客户', '需要', '还是']);
-    const qWords = [...q.matchAll(/[\u4e00-\u9fff]{2,}/gu)]
-        .map((item) => item[0])
-        .filter((word) => !stop.has(word));
-    if (qWords.length === 0)
-        return true;
-    const hits = qWords.filter((word) => corpus.includes(word));
-    // 「套餐」这类泛词命中一次不够；至少命中 2 个实词，或命中非泛词的关键实词。
+    const stop = new Set([
+        '可以', '什么', '怎么', '如何', '请问', '一下', '这个', '那个', '门店', '客户',
+        '需要', '还是', '这里', '还能', '你们', '咱们', '是否', '有没有', '吗啊', '嘛啊'
+    ]);
     const weak = new Set(['套餐', '团购', '订单', '衣服', '洗护']);
-    const strongHits = hits.filter((word) => !weak.has(word));
+    const qTerms = extractChineseTerms(q).filter((word) => !stop.has(word));
+    if (qTerms.length === 0)
+        return true;
+    const hits = qTerms.filter((word) => corpus.includes(word));
+    const strongHits = hits.filter((word) => !weak.has(word) && word.length >= 2);
     if (strongHits.length >= 1)
         return true;
     if (hits.length >= 2)
         return true;
+    // 领域关键词：发票/预约/停车等任一词与客户+资料同现，即视为相关。
+    const domain = ['发票', '开票', '电子发票', '退款', '预约', '停车', '营业', '地址', '核销', '取件', '配送'];
+    if (domain.some((key) => q.includes(key) && corpus.includes(key)))
+        return true;
     return false;
+}
+
+/** 拆成 overlapping 二字、三字词，供相关性打分。 */
+function extractChineseTerms(text) {
+    const chars = String(text ?? '').replace(/[^\u4e00-\u9fff]/gu, '');
+    const terms = [];
+    for (let i = 0; i < chars.length - 1; i += 1)
+        terms.push(chars.slice(i, i + 2));
+    for (let i = 0; i < chars.length - 2; i += 1)
+        terms.push(chars.slice(i, i + 3));
+    return terms;
 }
 
 function pickRelevantRagSnippet(query, ragContext) {
@@ -185,7 +201,11 @@ function sanitizeCustomerReply(content, userMessage = '', options = {}) {
         .replace(/^(?:#{1,6}\s*)?\d+(\.\d+)*\s*[^\n]*\n+/u, '')
         .replace(/#{1,6}\s*/g, '')
         .trim() || '这个我帮您转人工确认一下。';
-    return stripRedundantHandoffTail(cleaned, Boolean(options.hasRagEvidence));
+    // 去掉「微信/QQ」与跨平台追问等违禁/多余话术，否则经营端会拒发或答非所问。
+    return sanitizePlatformOutboundText(
+        stripRedundantHandoffTail(cleaned, Boolean(options.hasRagEvidence)),
+        options.platform
+    );
 }
 export class OpenClawClient {
     /**
@@ -296,8 +316,17 @@ export class OpenClawClient {
         const hasOrderResult = (input.ragContext ?? []).some((item) => /公司订单系统查询结果/.test(String(item?.content ?? ''))
             || item?.metadata?.source === 'company-order-system');
         const casual = isCasualCustomerMessage(input.message);
+        const channelLabel = platformChannelLabel(input.platform);
+        const platformRules = channelLabel
+            ? [
+                `当前对话渠道：${channelLabel}。客户此刻就在这个平台跟你聊天，默认订单也来自本渠道，除非客户明确说是别家平台下单。`,
+                '严禁再问「您是在美团还是抖音买的吗」或让客户改去其他平台咨询；需要核订单时只说「把订单号或订单截图发在本对话」。',
+                '不要主动提及其他竞品平台名称来分流；客户自己提到别家订单时，仍请对方在本对话发订单号协助核对。'
+            ]
+            : [];
         const systemRules = [
-            '你是门店团购的真人客服，正在微信式即时聊天。',
+            '你是门店团购的真人客服，正在即时聊天。',
+            ...platformRules,
             '优先 1～2 句；开门见山答客户刚问的点，不要先客套再绕弯。',
             '严禁用这些开场（每条回复都不许出现在开头）：好的、明白、明白的、好的明白、收到、了解。直接从答案说起。',
             '不要每句都说“跟门店确认 / 转人工”；资料够就直接答完，资料不够再问一句关键细节，只有完全答不了才用转人工句。',
@@ -306,6 +335,7 @@ export class OpenClawClient {
             '如果资料与客户问题明显不符（例如客户问套餐清单，资料却在讲叠加规则），不要硬套资料，先追问客户具体想了解哪一类，或说明需要再确认。',
             '寒暄、致谢：简短自然接话，不要提转人工，也不要提知识库/模型/检索。',
             '不要承诺退款、赔偿、免费赠送、特殊折扣；去渍等效果类问题用“尽力处理、不保证百分之百”这类已有规则表述，不要另加转人工。',
+            '严禁在回复中出现：微信、加微、微信号、威信、vx、v信、WeChat、QQ、扣扣等站外导流词；需要客户补充信息时只说「在本对话里发给我」或「随时在这边跟我说」。',
             '若资料里有「公司订单系统查询结果」：必须把其中非“未知/已脱敏”的字段用口语逐项告诉客户（订单号、状态、商品、金额、门店等），禁止只说“已调取/以系统为准”却不报具体信息；查不到才如实说未查到。',
             '不得泄露接口数据、隐私和“知识库/RAG/模型”等内部说法。',
             '只输出纯文本，不要 Markdown、编号列表。'
@@ -322,6 +352,7 @@ export class OpenClawClient {
             : '';
         const userContent = [
             summaryBlock + `客户本轮说：${input.message}`,
+            channelLabel ? `当前渠道：${channelLabel}（勿再问客户在哪个平台下单）。` : '',
             '',
             hasRag
                 ? `可参考的门店/订单资料：\n${input.ragContext.map((item, index) => `${index + 1}. ${item.content}`).join('\n')}`
@@ -335,7 +366,7 @@ export class OpenClawClient {
                     ? '上一句客服已用过“好的/明白”类开场，本轮严禁再这样开头，换说法直接答。'
                     : '本轮禁止“好的/明白”开头。'),
             '请写一条可直接发送的短回复。'
-        ].join('\n');
+        ].filter(Boolean).join('\n');
         const payload = {
             model: llm.model,
             messages: [
@@ -387,7 +418,10 @@ export class OpenClawClient {
             return this.generateLocalFallback(input, 'LLM 返回空内容', { emptyModelOutput: true });
         }
         return {
-            content: sanitizeCustomerReply(safeContent, input.message, { hasRagEvidence: hasRag }),
+            content: sanitizeCustomerReply(safeContent, input.message, {
+                hasRagEvidence: hasRag,
+                platform: input.platform
+            }),
             confidence: raw.confidence ?? 0.7,
             raw: { ...raw, provider: llm.provider }
         };
@@ -449,7 +483,16 @@ export class OpenClawClient {
      */
     generateLocalFallback(input, reason, options = {}) {
         const message = String(input.message ?? '');
-        const relevantRaw = pickRelevantRagSnippet(message, input.ragContext);
+        let relevantRaw = pickRelevantRagSnippet(message, input.ragContext);
+        // 超时且规则粗筛未命中：若客户问题与资料共享领域词（如发票），仍用首条相关资料，避免空等 30s 只回转人工。
+        if (!relevantRaw && options.timedOut) {
+            const domain = ['发票', '开票', '退款', '预约', '停车', '营业', '地址', '核销', '取件', '配送', '套餐'];
+            const hit = (Array.isArray(input.ragContext) ? input.ragContext : []).find((item) => {
+                const content = String(item?.content ?? '');
+                return domain.some((key) => message.includes(key) && content.includes(key));
+            });
+            relevantRaw = hit ? String(hit.content).trim() : '';
+        }
         const rewritten = relevantRaw ? rewriteKbSnippetForCustomer(relevantRaw) : '';
         const timedOut = Boolean(options.timedOut);
         let drafted;
@@ -477,7 +520,10 @@ export class OpenClawClient {
         else {
             drafted = '这个点我需要再帮您确认一下，您方便说得再具体一点吗？';
         }
-        const content = sanitizeCustomerReply(drafted, message, { hasRagEvidence: Boolean(rewritten) })
+        const content = sanitizeCustomerReply(drafted, message, {
+            hasRagEvidence: Boolean(rewritten),
+            platform: input.platform
+        })
             || (timedOut
                 ? '抱歉让您久等了，需要的话我帮您转人工确认一下。'
                 : '这个我帮您转人工确认一下。');

@@ -1,0 +1,287 @@
+<!--
+  @file docs/extension-rpa-flow.html
+  @module 后台、文档、样例
+  @description Chrome 扩展 RPA 逻辑梳理（浏览器可直接打开）。
+  @see 联动关注：content.js、background.js、extension-gateway.ts。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chrome 扩展 RPA 逻辑梳理</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#667085; --line:#dfe3e8; --soft:#f6f7f9; --blue:#175cd3; --blue-soft:#eff6ff; --green:#067647; --green-soft:#ecfdf3; --amber:#b54708; --amber-soft:#fffaeb; --red:#b42318; --red-soft:#fef3f2; --purple:#6941c6; --purple-soft:#f4ebff; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--ink); background: var(--soft); }
+    header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; min-height: 64px; padding: 10px 28px; border-bottom: 1px solid #28364b; background: #172033; color: #fff; }
+    header h1 { margin: 0; font-size: 18px; }
+    header p { margin: 4px 0 0; color: #bdc7d6; font-size: 12px; }
+    header a { color: #93c5fd; font-size: 12px; }
+    .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: calc(100vh - 64px); }
+    nav { position: sticky; top: 64px; align-self: start; height: calc(100vh - 64px); overflow: auto; padding: 20px 14px; border-right: 1px solid var(--line); background: #fff; }
+    nav strong { display: block; padding: 0 10px 10px; font-size: 12px; color: var(--muted); }
+    nav a { display: block; margin: 2px 0; border-radius: 5px; padding: 9px 10px; color: #344054; font-size: 13px; text-decoration: none; }
+    nav a:hover { background: #f2f4f7; color: var(--blue); }
+    main { max-width: 1100px; margin: 0 auto; padding: 26px 30px 60px; }
+    section { margin-bottom: 36px; scroll-margin-top: 80px; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    h3 { margin: 18px 0 8px; font-size: 14px; }
+    p, li { line-height: 1.7; font-size: 13px; color: #344054; }
+    .lead { color: var(--muted); max-width: 920px; }
+    .flow { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }
+    .step { flex: 1 0 120px; border: 1px solid #cfd5dd; border-radius: 6px; padding: 12px; background: #fff; text-align: center; font-size: 12px; font-weight: 650; }
+    .step small { display: block; margin-top: 6px; color: var(--muted); font-weight: 400; font-size: 11px; }
+    .arrow { display: grid; place-items: center; flex: 0 0 16px; color: #98a2b3; font-weight: 800; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+    .grid.two { grid-template-columns: 1fr 1fr; }
+    .card { border: 1px solid var(--line); border-radius: 7px; padding: 14px; background: #fff; }
+    .card h3 { margin: 0 0 6px; }
+    .tag { display: inline-block; border-radius: 4px; padding: 2px 7px; font-size: 11px; font-weight: 700; background: var(--blue-soft); color: var(--blue); }
+    .tag.green { background: var(--green-soft); color: var(--green); }
+    .tag.amber { background: var(--amber-soft); color: var(--amber); }
+    .tag.red { background: var(--red-soft); color: var(--red); }
+    .tag.purple { background: var(--purple-soft); color: var(--purple); }
+    code { border-radius: 4px; padding: 1px 5px; background: #eef1f5; font-family: Consolas, monospace; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
+    th, td { border-bottom: 1px solid #eaecf0; padding: 10px 12px; text-align: left; font-size: 12px; vertical-align: top; }
+    th { background: #f9fafb; color: #475467; }
+    tr:last-child td { border-bottom: 0; }
+    pre.box { margin: 0; border: 1px solid #d5d9e0; border-radius: 6px; padding: 14px; background: #111827; color: #e5e7eb; font-size: 12px; line-height: 1.65; overflow: auto; }
+    .notice { border-left: 4px solid var(--amber); padding: 12px 14px; background: var(--amber-soft); color: #7a2e0e; font-size: 13px; }
+    .phase { display: flex; gap: 10px; flex-wrap: wrap; }
+    .phase .card { flex: 1 1 180px; }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .grid, .grid.two { grid-template-columns: 1fr; }
+      main { padding: 20px 14px 40px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Chrome 扩展 RPA 逻辑梳理</h1>
+      <p>content.js · background.js · popup · 本机 Gateway</p>
+    </div>
+    <a href="project-flow.html">← 返回项目流程总览</a>
+  </header>
+  <div class="layout">
+    <nav>
+      <strong>目录</strong>
+      <a href="#overview">总览</a>
+      <a href="#files">文件分工</a>
+      <a href="#main">主链路</a>
+      <a href="#task">会话串行锁</a>
+      <a href="#expected">expected 是什么</a>
+      <a href="#scan">扫描与入库</a>
+      <a href="#draft">草稿回填发送</a>
+      <a href="#gateway">网关选稿</a>
+      <a href="#msg">消息类型表</a>
+      <a href="#troubleshoot">常见现象对照</a>
+    </nav>
+    <main>
+      <section id="overview">
+        <h2>一、总览</h2>
+        <p class="lead">扩展跑在你已登录的美团经营宝 / 抖音来客页里。它<strong>不登录平台</strong>，只读 DOM、上报消息、接收草稿并回填或点击发送。大脑（RAG/LLM）都在本地 API；扩展和 API 用本机 WebSocket 说话。</p>
+        <div class="flow" style="margin-top:16px">
+          <div class="step">经营宝 / 来客<br/><small>真实聊天页 DOM</small></div>
+          <div class="arrow">→</div>
+          <div class="step">content.js<br/><small>扫描 / 切会话 / 点发送</small></div>
+          <div class="arrow">→</div>
+          <div class="step">background.js<br/><small>WebSocket 桥</small></div>
+          <div class="arrow">→</div>
+          <div class="step">extension-gateway<br/><small>expected + 推草稿</small></div>
+          <div class="arrow">→</div>
+          <div class="step">ReplyWorker<br/><small>RAG + LLM</small></div>
+        </div>
+      </section>
+
+      <section id="files">
+        <h2>二、扩展内文件分工</h2>
+        <div class="grid">
+          <div class="card">
+            <span class="tag">content.js</span>
+            <h3>页面脚本（核心）</h3>
+            <p>注入聊天页：扫未读、切会话、读气泡、上报 inbound/outbound、收到草稿后回填/点击。有串行锁 <code>conversationTask</code>。</p>
+          </div>
+          <div class="card">
+            <span class="tag green">background.js</span>
+            <h3>后台 Service Worker</h3>
+            <p>连 <code>ws://127.0.0.1:3001/rpa/extension/ws</code>；把 content 消息转发网关；把 draft 路由回正确标签/frame。</p>
+          </div>
+          <div class="card">
+            <span class="tag amber">popup + profiles</span>
+            <h3>开关与选择器</h3>
+            <p>启用监听、自动处理未读、自动发送；美团/抖音选择器与白名单。自动发送还须服务端 <code>RPA_AUTO_SEND_ENABLED</code>。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="main">
+        <h2>三、一条消息从进到出（主链路）</h2>
+        <pre class="box">1. content 定时/DOM 变化 → scanMessages()
+2. 发现未读 → scheduleUnreadConversation() 切到该客户（串行）
+3. 读客户气泡 → 生成稳定 messageId → 发 type=inbound
+4. background → Gateway：先登记 expectedMessageId，再 POST /rpa/inbound
+5. ReplyWorker：订单路由 / RAG / LLM → 写 ReplyDraft
+6. Gateway 约 1.5s 轮询：matched 或孤儿救援 → 推 type=draft
+7. background 按会话找到 tab → content.applyDraft()
+8. 强制切回草稿对应会话 → 回填输入框
+9. 若允许自动发送 → 点发送按钮 → draft_send_result
+10. 页面再扫到商家气泡 → type=outbound → 草稿标 sent</pre>
+        <div class="notice" style="margin-top:14px">
+          <strong>安全默认：</strong>没开弹窗「自动发送」或没开环境变量 <code>RPA_AUTO_SEND_ENABLED</code> 时，只回填不点击，需人工确认再发。
+        </div>
+      </section>
+
+      <section id="task">
+        <h2>四、会话串行锁 conversationTask</h2>
+        <p class="lead">同时只能服务一个「当前任务」，防止 A 等回复时跳到 B 把答案填进错会话。</p>
+        <div class="phase" style="margin-top:12px">
+          <div class="card">
+            <span class="tag purple">switching</span>
+            <h3>正在切换</h3>
+            <p>刚点了左侧会话，还在等聊天区落地。卡住过久会清锁重试。</p>
+          </div>
+          <div class="card">
+            <span class="tag amber">waiting-draft</span>
+            <h3>等待 AI 草稿</h3>
+            <p>已在目标会话（或切入后升级）。其它未读<strong>排队</strong>，约 120 秒超时才放锁。</p>
+          </div>
+          <div class="card">
+            <span class="tag green">applying-draft</span>
+            <h3>草稿投递中</h3>
+            <p>草稿到了，强制切回该客户再回填/发送。期间禁止未读抢切。</p>
+          </div>
+        </div>
+        <h3>放锁时机</h3>
+        <ul>
+          <li>回填/发送结束 → <code>releaseConversationTaskAfterDraft</code> → 过一会再扫下一个未读</li>
+          <li>切失败 / 等草稿超时 → <code>clearConversationTask</code></li>
+        </ul>
+      </section>
+
+      <section id="expected">
+        <h2>五、expected 是什么（网关侧）</h2>
+        <div class="grid two">
+          <div class="card">
+            <h3>一句话</h3>
+            <p><code>expectedMessageIds</code> = 本插件连接当前在等「哪几条客户消息」的 AI 回复。inbound 上报时<strong>先写入</strong>，再等草稿 <code>messageId</code> 对上再推。</p>
+          </div>
+          <div class="card">
+            <h3>为什么需要</h3>
+            <p>LLM 很慢时库里可能堆多条 pending。没有 expected，旧答会被推到当前会话造成乱回/重发。</p>
+          </div>
+        </div>
+        <h3>选稿优先级</h3>
+        <pre class="box">unrepliedDrafts（pending 且尚未被判定已回复）
+    ├─ matchedDrafts：draft.messageId ∈ expected     ← 优先
+    └─ recentOrphanRescue：近期孤儿（expected 对不上时的救援）
+candidates = matched 按时间 FIFO；自动发送每轮最早 1 条。expected 空时孤儿/pending 同样从早到晚兜底。
+自动发送开启时每轮最多推 1 条</pre>
+      </section>
+
+      <section id="scan">
+        <h2>六、扫描与入库（content.js）</h2>
+        <table>
+          <thead><tr><th>步骤</th><th>做什么</th><th>注意点</th></tr></thead>
+          <tbody>
+            <tr><td>读 session</td><td>美团埋点 userId / 抖音昵称+URL</td><td>系统会话、历史咨询 Tab 不处理</td></tr>
+            <tr><td>切回话待回复</td><td>检测尾巴未回复；有 pending 草稿则 <code>request_drafts</code> 直接推送发送</td><td>不重新跑 LLM；若调度器已在切其他未读，禁止用当前页找回抢锁（0.3.29）</td></tr>
+            <tr><td>初扫入队</td><td>美团/抖音均按未读角标放行<strong>末尾 N 条</strong>（不是只最后 1 条）</td><td>同客户连发中间句不能只记 seen</td></tr>
+            <tr><td>稳定 messageId</td><td>优先 DOM 显式 id；否则「会话+方向+出现序号+正文」</td><td>不用 DOM index，避免切回话变新 id 重复回复</td></tr>
+            <tr><td>同正文去重</td><td><code>submittedInboundContents</code></td><td>切回话回扫同一句不二次入库</td></tr>
+            <tr><td>初扫</td><td>只记 seen，不入队</td><td>避免一打开页面就把历史全回一遍</td></tr>
+            <tr><td>outbound</td><td>商家气泡上报</td><td>用于确认真正发出 → 草稿标 sent</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="draft">
+        <h2>七、草稿回填 / 自动发送（applyDraft）</h2>
+        <div class="flow">
+          <div class="step">收到 draft<br/><small>background 路由到 frame</small></div>
+          <div class="arrow">→</div>
+          <div class="step">ensureConversation<br/><small>切到草稿客户</small></div>
+          <div class="arrow">→</div>
+          <div class="step">防重检查<br/><small>本轮提问后是否已有同文</small></div>
+          <div class="arrow">→</div>
+          <div class="step">回填输入框<br/><small>dispatchEditableInput</small></div>
+          <div class="arrow">→</div>
+          <div class="step">条件满足？<br/><small>点发送 / 仅回填</small></div>
+        </div>
+        <h3>何时会点发送（四者都要）</h3>
+        <ul>
+          <li>弹窗勾了自动发送</li>
+          <li>服务端 <code>RPA_AUTO_SEND_ENABLED=true</code></li>
+          <li>草稿 <code>riskLevel === 'low'</code> 且 <code>allowAutoSend</code></li>
+          <li>有发送按钮选择器，且本轮提问后页面还没有同文商家气泡</li>
+        </ul>
+        <div class="notice">
+          <strong>踩过的坑：</strong>超时兜底话术经常同一句。若「整页任意历史有同文就跳过」，会误判 <code>already_on_page</code> 导致<strong>新问题完全不发</strong>。现已改为只看「当前客户这句提问之后」。
+        </div>
+      </section>
+
+      <section id="gateway">
+        <h2>八、网关侧关键概念</h2>
+        <table>
+          <thead><tr><th>名字</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td><code>expectedMessageIds</code></td><td>当前连接等待回复的客户消息 id 集合</td></tr>
+            <tr><td><code>matchedDrafts</code></td><td>messageId 命中 expected 的草稿</td></tr>
+            <tr><td><code>recentOrphanRescue</code></td><td>expected 对不上时的近期孤儿救援名单</td></tr>
+            <tr><td><code>draftPushState</code></td><td>每条草稿推过没有、点过没有，防重复推/重复点</td></tr>
+            <tr><td><code>denyReason</code></td><td>为什么不能自动发送（扩展开关/服务端开关/风险/冷却等）</td></tr>
+            <tr><td><code>fill_only</code></td><td>只推到输入框，不授权点击</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="msg">
+        <h2>九、扩展 ↔ 网关消息类型</h2>
+        <div class="grid two">
+          <div class="card">
+            <span class="tag">扩展 → 网关</span>
+            <ul>
+              <li><code>hello</code> / <code>session</code>：登记会话</li>
+              <li><code>inbound</code> / <code>outbound</code>：客户/商家消息</li>
+              <li><code>client_settings</code>：同步自动发送开关</li>
+              <li><code>draft_send_result</code>：是否点到发送</li>
+              <li><code>diagnostics</code>：选择器诊断（无正文）</li>
+              <li><code>heartbeat</code> / <code>reset_sessions</code></li>
+            </ul>
+          </div>
+          <div class="card">
+            <span class="tag green">网关 → 扩展</span>
+            <ul>
+              <li><code>connected</code>：握手 + 白名单状态</li>
+              <li><code>draft</code>：推送待回填/发送的草稿</li>
+              <li><code>inbound_ack</code> / <code>outbound_ack</code></li>
+              <li><code>heartbeat_ack</code> / <code>error</code></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="troubleshoot">
+        <h2>十、终端日志 ↔ 含义</h2>
+        <table>
+          <thead><tr><th>日志/现象</th><th>大致含义</th><th>先查什么</th></tr></thead>
+          <tbody>
+            <tr><td><code>pending=N expected=0</code></td><td>有草稿但对不上 expected</td><td>孤儿救援是否推动；扩展是否重连丢名单</td></tr>
+            <tr><td><code>LLM 超时，本地兜底</code></td><td>等满超时后用本地话术</td><td>Agnes 延迟；<code>OPENCLAW_TIMEOUT_MS</code></td></tr>
+            <tr><td><code>推送插件 自动发送=是</code></td><td>网关已授权点击</td><td>接着应有「已点发送」或点击失败</td></tr>
+            <tr><td><code>already_on_page</code></td><td>认为本轮后已有同文，跳过点击</td><td>是否误判历史同文；扩展是否 ≥0.3.23</td></tr>
+            <tr><td><code>fill_only</code></td><td>只回填不点</td><td>弹窗开关 / <code>RPA_AUTO_SEND_ENABLED</code> / 风险等级</td></tr>
+            <tr><td>切回话又重发</td><td>旧稿再推或 messageId 抖动</td><td>串行锁、draftPushState、稳定 id</td></tr>
+          </tbody>
+        </table>
+        <p style="margin-top:16px;color:var(--muted)">源码入口：<code>extensions/customer-ai-rpa/content.js</code>、<code>background.js</code>、<code>apps/api/src/rpa/extension-gateway.ts</code></p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
