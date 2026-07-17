@@ -1,0 +1,518 @@
+<!--
+  @file docs/extension-rpa-logic.html
+  @module 后台、文档、样例
+  @description 按实际链路讲解 Chrome 扩展各文件逻辑与分支判断（浏览器可直接打开）。
+  @see 联动关注：extensions/customer-ai-rpa/*、extension-rpa-flow.html、extension-rpa-files.html。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>插件实际链路与逻辑判断 · customer-ai-rpa</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033; --muted: #667085; --line: #dfe3e8; --soft: #f6f7f9;
+      --blue: #175cd3; --blue-soft: #eff6ff; --green: #067647; --green-soft: #ecfdf3;
+      --amber: #b54708; --amber-soft: #fffaeb; --red: #b42318; --red-soft: #fef3f2;
+      --purple: #6941c6; --purple-soft: #f4ebff;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--ink); background: var(--soft); }
+    header {
+      position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; min-height: 64px; padding: 10px 28px; border-bottom: 1px solid #28364b; background: #172033; color: #fff;
+    }
+    header h1 { margin: 0; font-size: 18px; }
+    header p { margin: 4px 0 0; color: #bdc7d6; font-size: 12px; }
+    header a { color: #93c5fd; font-size: 12px; text-decoration: none; margin-left: 12px; }
+    .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: calc(100vh - 64px); }
+    nav {
+      position: sticky; top: 64px; align-self: start; height: calc(100vh - 64px); overflow: auto;
+      padding: 18px 12px; border-right: 1px solid var(--line); background: #fff;
+    }
+    nav strong { display: block; padding: 8px 10px 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    nav a {
+      display: block; margin: 2px 0; border-radius: 5px; padding: 8px 10px; color: #344054;
+      font-size: 13px; text-decoration: none;
+    }
+    nav a:hover { background: #f2f4f7; color: var(--blue); }
+    main { max-width: 1080px; margin: 0 auto; padding: 26px 30px 80px; }
+    section { margin-bottom: 42px; scroll-margin-top: 80px; }
+    h2 { margin: 0 0 10px; font-size: 20px; }
+    h3 { margin: 22px 0 8px; font-size: 15px; }
+    h4 { margin: 14px 0 6px; font-size: 13px; }
+    p, li { line-height: 1.75; font-size: 13px; color: #344054; }
+    .lead { color: var(--muted); max-width: 900px; }
+    .tag {
+      display: inline-block; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 700;
+      background: var(--blue-soft); color: var(--blue); margin-right: 4px;
+    }
+    .tag.green { background: var(--green-soft); color: var(--green); }
+    .tag.amber { background: var(--amber-soft); color: var(--amber); }
+    .tag.red { background: var(--red-soft); color: var(--red); }
+    .tag.purple { background: var(--purple-soft); color: var(--purple); }
+    .card {
+      border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; background: #fff; margin: 12px 0;
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    code, .fn {
+      border-radius: 4px; padding: 1px 5px; background: #eef1f5;
+      font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px;
+    }
+    .fn { color: #0f3d8c; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: #fff; margin: 10px 0 14px; border-radius: 6px; overflow: hidden; }
+    th, td { border-bottom: 1px solid #eaecf0; padding: 9px 11px; text-align: left; font-size: 12px; vertical-align: top; }
+    th { background: #f9fafb; color: #475467; }
+    tr:last-child td { border-bottom: 0; }
+    .yes { color: var(--green); font-weight: 700; }
+    .no { color: var(--red); font-weight: 700; }
+    .flow {
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; margin: 14px 0; padding: 12px;
+      border: 1px dashed #cfd5dd; border-radius: 8px; background: #fff;
+    }
+    .step {
+      flex: 1 1 90px; min-width: 88px; border: 1px solid #cfd5dd; border-radius: 6px;
+      padding: 10px 8px; background: #fafbfc; text-align: center; font-size: 12px; font-weight: 650;
+    }
+    .step small { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; font-size: 11px; }
+    .step.file { border-color: #b2ccff; background: var(--blue-soft); }
+    .step.mid { border-color: #abefc6; background: var(--green-soft); }
+    .arrow { display: grid; place-items: center; color: #98a2b3; font-weight: 800; padding: 0 2px; }
+    .decision {
+      margin: 12px 0; padding: 12px 14px 12px 16px; border-left: 4px solid var(--purple);
+      background: var(--purple-soft); border-radius: 0 8px 8px 0;
+    }
+    .decision strong { color: var(--purple); }
+    .branch { margin: 8px 0 0; padding-left: 0; list-style: none; }
+    .branch li {
+      margin: 6px 0; padding: 8px 10px; border-radius: 6px; background: #fff;
+      border: 1px solid #e4e7ec; font-size: 12px;
+    }
+    .branch .if { color: var(--amber); font-weight: 700; }
+    .branch .then { color: #344054; }
+    .notice {
+      border-left: 4px solid var(--amber); padding: 12px 14px; background: var(--amber-soft);
+      color: #7a2e0e; font-size: 13px; margin: 12px 0; border-radius: 0 6px 6px 0;
+    }
+    .ok {
+      border-left: 4px solid var(--green); padding: 12px 14px; background: var(--green-soft);
+      color: #055f3a; font-size: 13px; margin: 12px 0; border-radius: 0 6px 6px 0;
+    }
+    pre.box {
+      margin: 10px 0; border: 1px solid #d5d9e0; border-radius: 6px; padding: 14px;
+      background: #111827; color: #e5e7eb; font-size: 12px; line-height: 1.65; overflow: auto;
+    }
+    .file-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .grid { grid-template-columns: 1fr; }
+      main { padding: 18px 14px 50px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>插件实际链路与逻辑判断</h1>
+      <p>按时间顺序讲透 customer-ai-rpa · 每个文件在链路中的位置 · 重要 if 分支</p>
+    </div>
+    <div>
+      <a href="extension-rpa-files.html">函数/行号索引 →</a>
+      <a href="extension-rpa-flow.html">RPA 概念流 →</a>
+      <a href="project-flow.html">项目总览 →</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav>
+      <strong>总览</strong>
+      <a href="#big">一张图看懂</a>
+      <a href="#actors">角色分工</a>
+      <strong>主链路</strong>
+      <a href="#boot">① 启动连接</a>
+      <a href="#scan">② 扫消息上报</a>
+      <a href="#mid">③ 中台出草稿</a>
+      <a href="#draft">④ 回填发送</a>
+      <strong>支线</strong>
+      <a href="#switch">自动切未读</a>
+      <a href="#recover">找回草稿</a>
+      <strong>按文件</strong>
+      <a href="#f-manifest">manifest.json</a>
+      <a href="#f-profiles">platform-profiles.js</a>
+      <a href="#f-bg">background.js</a>
+      <a href="#f-content">content.js</a>
+      <a href="#f-main">douyin-main-click.js</a>
+      <a href="#f-popup">popup.*</a>
+      <strong>排障</strong>
+      <a href="#debug">常见卡点对照</a>
+    </nav>
+
+    <main>
+      <!-- ========== 总览 ========== -->
+      <section id="big">
+        <h2>一、一张图看懂（先看这个）</h2>
+        <p class="lead">不要按函数名字母序读。下面是<strong>真实时间顺序</strong>：客户发一句 → 网页出现回复。每个方块标了「哪个文件在干活」。</p>
+
+        <div class="flow">
+          <div class="step">客户说话<small>美团/抖音页</small></div>
+          <div class="arrow">→</div>
+          <div class="step file">content<br/>扫到气泡</div>
+          <div class="arrow">→</div>
+          <div class="step file">background<br/>转给中台</div>
+          <div class="arrow">→</div>
+          <div class="step mid">中台<br/>RAG+AI</div>
+          <div class="arrow">→</div>
+          <div class="step file">background<br/>找标签页</div>
+          <div class="arrow">→</div>
+          <div class="step file">content<br/>填框/发送</div>
+        </div>
+
+        <div class="ok">
+          <strong>记一句：</strong>content = 眼睛和手；background = 传话筒和通讯录；中台 = 大脑；popup = 遥控器。
+        </div>
+      </section>
+
+      <section id="actors">
+        <h2>二、角色分工（文件级）</h2>
+        <table>
+          <thead><tr><th>文件</th><th>角色</th><th>在链路里干什么</th><th>不干什么</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>manifest.json</code></td>
+              <td><span class="tag">清单</span></td>
+              <td>声明权限、能注入哪些网站、谁当后台脚本</td>
+              <td>不含业务逻辑</td>
+            </tr>
+            <tr>
+              <td><code>platform-profiles.js</code></td>
+              <td><span class="tag green">配置</span></td>
+              <td>按 URL 判断美团还是抖音；给出默认 CSS 选择器</td>
+              <td>不连网、不点页面</td>
+            </tr>
+            <tr>
+              <td><code>background.js</code></td>
+              <td><span class="tag purple">中转</span></td>
+              <td>连本机中台；记「客户在哪个标签页」；把草稿送到对的页</td>
+              <td>不读聊天气泡、不点发送</td>
+            </tr>
+            <tr>
+              <td><code>content.js</code></td>
+              <td><span class="tag red">核心</span></td>
+              <td>扫未读、切会话、上报消息、回填、点发送、串行锁</td>
+              <td>不调大模型</td>
+            </tr>
+            <tr>
+              <td><code>douyin-main-click.js</code></td>
+              <td><span class="tag amber">辅助</span></td>
+              <td>抖音点左侧客户时，在网页自己环境再点一次（防点不动）</td>
+              <td>不管美团、不管 AI</td>
+            </tr>
+            <tr>
+              <td><code>popup.html/js/css</code></td>
+              <td><span class="tag">遥控</span></td>
+              <td>开关监听/自动切会话/自动发送；改选择器；看连接状态</td>
+              <td>不跑主扫描循环</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ========== 主链路 ========== -->
+      <section id="boot">
+        <h2>三、主链路 ① 启动：插件怎么连上中台</h2>
+        <p>扩展一加载 / 浏览器一开机，<code>background.js</code> 就干活。</p>
+
+        <div class="flow">
+          <div class="step file">onInstalled<br/>/ onStartup</div>
+          <div class="arrow">→</div>
+          <div class="step file">connect()</div>
+          <div class="arrow">→</div>
+          <div class="step mid">WS :3001</div>
+          <div class="arrow">→</div>
+          <div class="step file">reinject<br/>PlatformTabs</div>
+          <div class="arrow">→</div>
+          <div class="step file">content<br/>开始扫描</div>
+        </div>
+
+        <div class="decision">
+          <strong>逻辑判断 · connect()</strong>
+          <ul class="branch">
+            <li><span class="if">如果</span> 弹窗关了「启用页面监听」(<code>enabled === false</code>)<br/><span class="then">→ 状态标 disabled，不连中台</span></li>
+            <li><span class="if">如果</span> 已经在连着 / 已连上<br/><span class="then">→ 直接 return，不建第二条 WebSocket</span></li>
+            <li><span class="if">如果</span> 连上成功<br/><span class="then">→ 告诉中台「能不能自动发送」；清空旧会话登记；把对照表里还记得的客户重新 hello；给平台页补注入脚本</span></li>
+            <li><span class="if">如果</span> 连接断开<br/><span class="then">→ 3 秒后再 connect；另有约 30 秒闹钟兜底（Chrome 后台睡着也能醒）</span></li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h4>打开美团/抖音页时</h4>
+          <p><code>webNavigation.onCompleted</code>：只对经营宝、来客域名注入 <code>platform-profiles.js</code> + <code>content.js</code>；抖音额外注入 MAIN 世界的 <code>douyin-main-click.js</code>。</p>
+        </div>
+      </section>
+
+      <section id="scan">
+        <h2>四、主链路 ② 扫消息：content 看见客户说话</h2>
+        <p>入口：<span class="fn">scanMessages()</span>（MutationObserver 防抖 400ms + 每 1.5s 定时扫）。</p>
+
+        <h3>4.1 每一轮扫描先过这些门</h3>
+        <div class="decision">
+          <strong>逻辑判断 · scanMessages 开头</strong>
+          <ul class="branch">
+            <li><span class="if">如果</span> 扩展刚被重载，上下文已死<br/><span class="then">→ 停观察器，整轮结束</span></li>
+            <li><span class="if">如果</span> URL 不是美团/抖音/Mock<br/><span class="then">→ 跳过这个 document</span></li>
+            <li><span class="if">如果</span> <code>enabled === false</code><br/><span class="then">→ 不上报消息（仍可能报诊断）</span></li>
+            <li><span class="if">如果</span> 抖音停在「历史咨询」Tab<br/><span class="then">→ 清会话、不自动处理</span></li>
+            <li><span class="if">如果</span> 客户不在白名单<br/><span class="then">→ 忽略并放锁</span></li>
+            <li><span class="if">如果</span> 抖音聊天区还在 loading / 会话已关闭<br/><span class="then">→ 不读气泡（防串会话），但可继续调度切未读</span></li>
+          </ul>
+        </div>
+
+        <h3>4.2 过门之后上报什么</h3>
+        <table>
+          <thead><tr><th>发给 background 的 type</th><th>含义</th><th>background 再干什么</th></tr></thead>
+          <tbody>
+            <tr><td><code>session</code></td><td>当前聊的是谁</td><td>写入对照表；转中台 <code>hello</code></td></tr>
+            <tr><td><code>inbound</code></td><td>客户气泡正文</td><td>原样转中台入库、排队 AI</td></tr>
+            <tr><td><code>outbound</code></td><td>商家已发出的气泡</td><td>转中台，用来确认「真的发出去了」</td></tr>
+            <tr><td><code>diagnostics</code></td><td>选择器命中数、开关</td><td>转中台给 /guide 看</td></tr>
+          </tbody>
+        </table>
+
+        <div class="decision">
+          <strong>逻辑判断 · 要不要把这条气泡当「新消息」入库</strong>
+          <ul class="branch">
+            <li><span class="if">如果</span> 本会话第一次扫到（初扫）<br/><span class="then">→ 历史只记 seen，一般不入队（防打开页面把整天记录全回一遍）；有未读角标时末尾 N 条仍可入队</span></li>
+            <li><span class="if">如果</span> 是抖音系统提示（新用户进线等）<br/><span class="then">→ 只记 seen，不当客户提问</span></li>
+            <li><span class="if">如果</span> 同正文指纹已提交过<br/><span class="then">→ 跳过（切回话回扫不重复回）</span></li>
+            <li><span class="if">如果</span> 抖音流式残文（「你」→「你好」）<br/><span class="then">→ 短的跳过，变长的允许更新</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="mid">
+        <h2>五、主链路 ③ 中台出草稿（插件外，但链路要接上）</h2>
+        <p>插件把 <code>inbound</code> 送出后，大脑在本机中台：</p>
+        <pre class="box">入库去重 → ReplyWorker → RAG 查知识 → LLM 写回复
+  → 风控（高风险转人工）→ 生成 ReplyDraft
+  → extension-gateway 经 WebSocket 推 type=draft</pre>
+        <p>推回来时带上 <code>session</code>（哪个客户）和 <code>payload</code>（回复正文、能否自动发、风险等级）。</p>
+      </section>
+
+      <section id="draft">
+        <h2>六、主链路 ④ 回填 / 发送：草稿回到网页</h2>
+
+        <h3>6.1 background 怎么决定送给谁</h3>
+        <div class="decision">
+          <strong>逻辑判断 · 收到中台 draft</strong>
+          <ul class="branch">
+            <li><span class="if">如果</span> <code>resolveDraftTarget</code> 在对照表找到了 tab/frame<br/><span class="then">→ 精确 <code>sendMessage(applyDraft)</code> 到那个小页面</span></li>
+            <li><span class="if">否则 且是抖音</span><br/><span class="then">→ 向所有来客标签页广播 applyDraft（名字对不齐时的兜底），由 content 自己再切对客户</span></li>
+            <li><span class="if">否则 且是美团</span><br/><span class="then">→ 找不到目标就丢了（美团 id 通常更稳，一般靠精确路由）</span></li>
+          </ul>
+        </div>
+
+        <h3>6.2 content.applyDraft 怎么决定填不填、发不发</h3>
+        <div class="decision">
+          <strong>逻辑判断 · applyDraft</strong>
+          <ul class="branch">
+            <li><span class="if">如果</span> 抖音在「历史咨询」<br/><span class="then">→ 不回填，回报 denyReason=history_tab</span></li>
+            <li><span class="if">如果</span> 强制切到草稿客户失败<br/><span class="then">→ 回报 switch_failed，放锁，稍后重扫</span></li>
+            <li><span class="if">如果</span> 找不到输入框 / 聊天未就绪<br/><span class="then">→ 回报 chat_not_ready 等，不硬点发送</span></li>
+            <li><span class="if">如果</span> 页面上「本轮提问之后」已有同文商家气泡<br/><span class="then">→ 当作已发出，不再点发送（防切回话重发）</span></li>
+            <li><span class="if">如果</span> 弹窗开了自动发送 <strong>且</strong> 中台允许 <strong>且</strong> 风险 low <strong>且</strong> 有发送按钮选择器<br/><span class="then">→ 填框后点发送</span></li>
+            <li><span class="if">否则</span><br/><span class="then">→ 只填输入框（fill-only），等人点发送或等下次条件满足</span></li>
+          </ul>
+        </div>
+
+        <div class="notice">
+          回填前会清洗「微信/QQ」和「美团还是抖音买的吗」等话术，避免平台拒发或答非所问。
+        </div>
+      </section>
+
+      <!-- ========== 支线 ========== -->
+      <section id="switch">
+        <h2>七、支线 A：自动切未读（多客户排队）</h2>
+        <p>开关：弹窗「自动处理未读会话」→ <code>autoSwitchConversations</code>。核心在 content 的 <span class="fn">scheduleUnreadConversation</span>。</p>
+
+        <div class="card">
+          <h4>串行锁 conversationTask 三个阶段</h4>
+          <table>
+            <thead><tr><th>phase</th><th>意思</th><th>能不能去切下一个未读</th></tr></thead>
+            <tbody>
+              <tr><td><code>switching</code></td><td>正在点左侧客户</td><td class="no">不能</td></tr>
+              <tr><td><code>waiting-draft</code></td><td>已进会话，等 AI 草稿（最长约 120 秒）</td><td class="no">不能（超时才放）</td></tr>
+              <tr><td><code>applying-draft</code></td><td>草稿正在回填/发送</td><td class="no">不能</td></tr>
+              <tr><td><code>null</code>（空闲）</td><td>没事干</td><td class="yes">可以 schedule 下一个</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="decision">
+          <strong>逻辑判断 · 要不要切到某个未读</strong>
+          <ul class="branch">
+            <li><span class="if">如果</span> 没开自动切会话<br/><span class="then">→ 整段调度直接 return</span></li>
+            <li><span class="if">如果</span> 输入框里还有没发出的字（人在编辑）<br/><span class="then">→ shouldDeferSwitch，暂不切</span></li>
+            <li><span class="if">如果</span> 抖音在历史咨询<br/><span class="then">→ 不切</span></li>
+            <li><span class="if">如果</span> 当前中间已经是这个未读客户<br/><span class="then">→ shouldSwitchToUnread 返回 null，不用切</span></li>
+            <li><span class="if">如果</span> 抖音聊天未就绪 / 停在系统会话 / 角标客户≠中间客户<br/><span class="then">→ 返回目标卡片，去点左侧</span></li>
+            <li><span class="if">如果</span> 美团：左侧未读 id ≠ 当前会话 id<br/><span class="then">→ 切过去</span></li>
+          </ul>
+        </div>
+
+        <p>抖音点击：content 先点一遍，再发 <code>douyinMainClick</code> → background 注入 MAIN 脚本再点（双保险）。</p>
+      </section>
+
+      <section id="recover">
+        <h2>八、支线 B：找回草稿（不重跑 AI）</h2>
+        <p>场景：你从 A 切到 B 又切回 A，A 还有未回完的话；或同页仍显示「尾巴未回复」。</p>
+        <div class="flow">
+          <div class="step file">content<br/>maybeRecover…</div>
+          <div class="arrow">→</div>
+          <div class="step file">background<br/>request_drafts</div>
+          <div class="arrow">→</div>
+          <div class="step mid">中台推<br/>已有 pending</div>
+          <div class="arrow">→</div>
+          <div class="step file">applyDraft</div>
+        </div>
+        <div class="decision">
+          <strong>逻辑判断 · maybeRecoverDraftsOnRefocus（重要！）</strong>
+          <ul class="branch">
+            <li><span class="if">如果</span> 调度器已经在切「别的客户」<br/><span class="then">→ <strong>不要抢锁</strong>（否则会出现「刚要点下一个未读，又被当前页钉死」）</span></li>
+            <li><span class="if">如果</span> 左侧角标或「商家最后一句之后的客户句」&gt; 0<br/><span class="then">→ 请求找回草稿；同会话最多约 8 秒一次</span></li>
+            <li><span class="if">如果</span> 抖音找不到任何商家气泡<br/><span class="then">→ 待回复条数按 0 算（避免整页历史锁死自动切）</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ========== 按文件 ========== -->
+      <section id="f-manifest">
+        <h2 class="file-title">九、<code>manifest.json</code> <span class="tag">清单</span></h2>
+        <p>没有 if/else 业务，但决定「能不能跑」：</p>
+        <ul>
+          <li><code>host_permissions</code>：能碰 3001、美团、抖音、Mock</li>
+          <li><code>content_scripts</code>：匹配到的页自动注入 profiles → content</li>
+          <li><code>background.service_worker</code>：后台中转是 background.js</li>
+          <li><code>action.default_popup</code>：点图标打开 popup</li>
+        </ul>
+        <div class="notice">改域名权限或版本后，必须到 <code>chrome://extensions</code> 点「重新加载」。</div>
+      </section>
+
+      <section id="f-profiles">
+        <h2 class="file-title">十、<code>platform-profiles.js</code> <span class="tag green">配置</span></h2>
+        <div class="decision">
+          <strong>逻辑判断 · detectPlatformFromUrl</strong>
+          <ul class="branch">
+            <li><span class="if">如果</span> URL 含 life.douyin.com → <span class="then">douyin</span></li>
+            <li><span class="if">如果</span> 含 g.dianping.com / ecom.meituan.com → <span class="then">meituan</span></li>
+            <li><span class="if">如果</span> 是本机 :3100 Mock → <span class="then">看 ?platform= 参数，默认抖音</span></li>
+            <li><span class="if">否则</span> → <span class="then">null（content 不处理）</span></li>
+          </ul>
+        </div>
+        <p><code>mergePlatformSettings</code>：全局开关（监听/自动切/自动发）+ 该平台选择器 + 代码默认值，合成 content 用的 settings。</p>
+      </section>
+
+      <section id="f-bg">
+        <h2 class="file-title">十一、<code>background.js</code> <span class="tag purple">中转</span></h2>
+        <p>文件头有「按时间读」导读。这里按链路归纳判断：</p>
+        <table>
+          <thead><tr><th>时机</th><th>关键判断</th><th>结果</th></tr></thead>
+          <tbody>
+            <tr><td>连中台</td><td>enabled？已有连接？</td><td>不连 / 复用 / 新建 WS</td></tr>
+            <tr><td>收到 draft</td><td>对照表有没有这个客户？</td><td>精确投递 / 抖音广播 / 丢掉</td></tr>
+            <tr><td>收到 session</td><td>同一小页面是否换人了？</td><td>删旧登记 + 登新 + hello</td></tr>
+            <tr><td>settingsChanged</td><td>（弹窗改了开关）</td><td>断线重连 + 重新注入页面</td></tr>
+            <tr><td>douyinMainClick</td><td>有没有 tabId？</td><td>MAIN 世界执行点击脚本</td></tr>
+          </tbody>
+        </table>
+        <p>对照表两张：</p>
+        <ul>
+          <li><code>sessionTargets</code>：客户名/id → 哪个标签页（送草稿用）</li>
+          <li><code>frameSessions</code>：这个小页面现在聊谁（换人时清旧的）</li>
+        </ul>
+      </section>
+
+      <section id="f-content">
+        <h2 class="file-title">十二、<code>content.js</code> <span class="tag red">核心</span></h2>
+        <p>最大、分支最多。按「主循环里发生的事」记：</p>
+
+        <h3>12.1 每 1.5 秒（或 DOM 一变）发生什么</h3>
+        <pre class="box">scanMessages
+  ├─ 诊断 diagnostics → background
+  ├─ scheduleUnreadConversation   // 自动切未读？看串行锁
+  ├─ readSession                  // 现在是谁
+  ├─ 白名单 / 历史 Tab / chatReady 守卫
+  ├─ maybeRecoverDraftsOnRefocus  // 要不要找回草稿
+  └─ 扫 inbound / outbound → 上报</pre>
+
+        <h3>12.2 串行锁（防多客户打架）</h3>
+        <p>同时只服务一个客户。AI 慢时绝不能因为左边又亮了未读就跳走——否则当前客户的回复会填错框。</p>
+
+        <h3>12.3 美团 vs 抖音差异（逻辑层）</h3>
+        <table>
+          <thead><tr><th>点</th><th>美团</th><th>抖音</th></tr></thead>
+          <tbody>
+            <tr><td>会话 id</td><td>data-user-id 等较稳</td><td>多为昵称；内部 id 常对不上</td></tr>
+            <tr><td>切会话点击</td><td>隔离世界点击即可</td><td>再加 MAIN 世界补点</td></tr>
+            <tr><td>历史咨询</td><td>—</td><td>整段 RPA 暂停</td></tr>
+            <tr><td>气泡 id</td><td>常有 data-messageid</td><td>指纹：会话+方向+序号+正文</td></tr>
+            <tr><td>连发多句</td><td>按角标末尾 N 条</td><td>冷切入取末尾 N；服务中可全量扫</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="f-main">
+        <h2 class="file-title">十三、<code>douyin-main-click.js</code> <span class="tag amber">辅助</span></h2>
+        <div class="decision">
+          <strong>逻辑判断</strong>
+          <ul class="branch">
+            <li><span class="if">如果</span> 在历史咨询 Tab → 不点，返回 history_tab</li>
+            <li><span class="if">如果</span> 找不到卡片 → no_cards</li>
+            <li><span class="if">如果</span> 有 nameHint → 按昵称模糊找卡再点</li>
+            <li><span class="if">否则</span> → 优先点「客户未读」（跳过预警通知），再退回任意未读</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="f-popup">
+        <h2 class="file-title">十四、<code>popup.html / popup.js / popup.css</code> <span class="tag">遥控</span></h2>
+        <table>
+          <thead><tr><th>控件</th><th>关掉会怎样</th><th>打开会怎样</th></tr></thead>
+          <tbody>
+            <tr><td>启用页面监听</td><td>background 不连中台 / content 不处理业务</td><td>正常扫和上报</td></tr>
+            <tr><td>自动处理未读会话</td><td>不自动点左侧，只处理你当前停在的客户</td><td>串行切未读</td></tr>
+            <tr><td>允许自动点击发送</td><td>只填输入框</td><td>low 风险且中台允许时可点发送</td></tr>
+          </tbody>
+        </table>
+        <p>保存后发 <code>settingsChanged</code> → background 重连并 reinject。AI 自动识别：采脱敏 DOM → 打本机 API → 校验后再填选择器。</p>
+      </section>
+
+      <!-- ========== 排障 ========== -->
+      <section id="debug">
+        <h2>十五、常见卡点对照（结合链路）</h2>
+        <table>
+          <thead><tr><th>现象</th><th>先查哪段逻辑</th><th>哪个文件</th></tr></thead>
+          <tbody>
+            <tr><td>弹窗显示未连接</td><td>connect / enabled / 中台是否启动</td><td>background + 本机 API</td></tr>
+            <tr><td>有未读但不切</td><td>autoSwitchConversations？锁在 waiting-draft？历史 Tab？白名单？</td><td>content scheduleUnread*</td></tr>
+            <tr><td>切了又跳回当前客户</td><td>找回草稿是否抢锁（0.3.29+ 已修）</td><td>content maybeRecover*</td></tr>
+            <tr><td>中台有草稿网页没动静</td><td>对照表有没有这个客户？抖音是否广播到了？</td><td>background resolveDraftTarget</td></tr>
+            <tr><td>只填框不发送</td><td>autoSend？allowAutoSend？riskLevel？发送按钮选择器？</td><td>content applyDraft + popup</td></tr>
+            <tr><td>重复回复同一句</td><td>稳定 id / 同正文去重 / 切回话重扫</td><td>content createStableId</td></tr>
+            <tr><td>抖音点左侧没反应</td><td>MAIN 点击是否执行；是否历史咨询</td><td>douyin-main-click + background</td></tr>
+          </tbody>
+        </table>
+
+        <div class="ok">
+          函数名索引、约行号见 <a href="extension-rpa-files.html">extension-rpa-files.html</a>。
+          会话锁 / expected 概念见 <a href="extension-rpa-flow.html">extension-rpa-flow.html</a>。
+          本文专注：<strong>实际链路 + 逻辑判断</strong>。
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

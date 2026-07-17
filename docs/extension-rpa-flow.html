@@ -66,13 +66,19 @@
       <h1>Chrome 扩展 RPA 逻辑梳理</h1>
       <p>content.js · background.js · popup · 本机 Gateway</p>
     </div>
-    <a href="project-flow.html">← 返回项目流程总览</a>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;">
+      <a href="extension-rpa-logic.html">实际链路与判断 →</a>
+      <a href="extension-rpa-files.html">扩展文件详解 →</a>
+      <a href="project-flow.html">← 返回项目流程总览</a>
+    </div>
   </header>
   <div class="layout">
     <nav>
       <strong>目录</strong>
+      <a href="extension-rpa-logic.html">实际链路与判断 ↗</a>
       <a href="#overview">总览</a>
       <a href="#files">文件分工</a>
+      <a href="extension-rpa-files.html">逐文件代码位置 ↗</a>
       <a href="#main">主链路</a>
       <a href="#task">会话串行锁</a>
       <a href="#expected">expected 是什么</a>
@@ -279,7 +285,7 @@ candidates = matched 按时间 FIFO；自动发送每轮最早 1 条。expected 
             <tr><td>切回话又重发</td><td>旧稿再推或 messageId 抖动</td><td>串行锁、draftPushState、稳定 id</td></tr>
           </tbody>
         </table>
-        <p style="margin-top:16px;color:var(--muted)">源码入口：<code>extensions/customer-ai-rpa/content.js</code>、<code>background.js</code>、<code>apps/api/src/rpa/extension-gateway.ts</code></p>
+        <p style="margin-top:16px;color:var(--muted)">源码入口：<code>extensions/customer-ai-rpa/content.js</code>、<code>background.js</code>、<code>apps/api/src/rpa/extension-gateway.ts</code>。逐文件函数与行号见 <a href="extension-rpa-files.html">extension-rpa-files.html</a>。</p>
       </section>
     </main>
   </div>

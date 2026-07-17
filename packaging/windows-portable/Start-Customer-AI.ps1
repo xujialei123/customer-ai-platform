@@ -215,6 +215,51 @@ function Show-PackagedSendConfig {
   }
 }
 
+function Test-DockerImagePresent([string]$ImageRef) {
+  return (Invoke-Docker -DockerArgs @('image', 'inspect', $ImageRef)) -eq 0
+}
+
+# Load bundled image tars from runtime\docker-images when local images are missing.
+# This is how handoff packages start without Docker Hub access.
+function Ensure-BundledDockerImages {
+  $dir = Join-Path $Root 'runtime\docker-images'
+  $specs = @(
+    @{ Ref = 'pgvector/pgvector:pg16'; File = 'pgvector-pg16.tar' },
+    @{ Ref = 'redis:7-alpine'; File = 'redis-7-alpine.tar' }
+  )
+  $missing = [System.Collections.Generic.List[string]]::new()
+  foreach ($spec in $specs) {
+    if (Test-DockerImagePresent $spec.Ref) {
+      Write-Host ("Docker: image ready {0}" -f $spec.Ref) -ForegroundColor DarkGray
+      continue
+    }
+    $tarPath = Join-Path $dir $spec.File
+    if (-not (Test-Path -LiteralPath $tarPath)) {
+      $missing.Add($spec.Ref) | Out-Null
+      continue
+    }
+    Write-Host ("Docker: loading bundled {0} ..." -f $spec.File) -ForegroundColor Yellow
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    $loadOut = & $DockerExe load -i $tarPath 2>&1
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $oldPreference
+    if ($code -ne 0) {
+      Write-Host '--- docker load output ---' -ForegroundColor Red
+      foreach ($line in @($loadOut)) { Write-Host ("  {0}" -f $line) -ForegroundColor DarkYellow }
+      throw ("Failed to docker load {0}" -f $spec.File)
+    }
+    if (-not (Test-DockerImagePresent $spec.Ref)) {
+      throw ("Loaded {0} but image {1} still missing. Tar may be corrupt." -f $spec.File, $spec.Ref)
+    }
+    Write-Host ("Docker: loaded {0}" -f $spec.Ref) -ForegroundColor Green
+  }
+  if ($missing.Count -gt 0) {
+    Write-Host ('Docker: no bundled tar for: {0}. compose will try registry pull.' -f ($missing -join ', ')) -ForegroundColor Yellow
+    Write-Host 'For handoff packages, rebuild with: pnpm package:windows -- -RequireDockerImages' -ForegroundColor Yellow
+  }
+}
+
 function Ensure-DockerServices {
   $postgresRunning = Test-ContainerRunning $PostgresContainer
   $redisRunning = Test-ContainerRunning $RedisContainer
@@ -242,10 +287,15 @@ function Ensure-DockerServices {
   $redisRunning = Test-ContainerRunning $RedisContainer
   if ($postgresRunning -and $redisRunning) { return }
 
-  # First-time setup: compose up with fixed project name.
+  # Missing containers: compose up recreates them (pulls images if local cache is empty).
+  Write-Host 'Docker: containers missing, running compose up -d ...' -ForegroundColor Yellow
   Push-Location $Root
   try {
-    $code = Invoke-Docker -DockerArgs @('compose', 'up', '-d')
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    $composeOut = & $DockerExe compose up -d 2>&1
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $oldPreference
     if ($code -ne 0) {
       $postgresRunning = Test-ContainerRunning $PostgresContainer
       $redisRunning = Test-ContainerRunning $RedisContainer
@@ -253,13 +303,127 @@ function Ensure-DockerServices {
         Write-Host 'Docker: compose reported conflict but required containers are running; continuing.' -ForegroundColor DarkGray
         return
       }
-      throw 'Docker compose up failed. Check Docker Desktop and docker-compose.yml.'
+      Write-Host ''
+      Write-Host '--- docker compose up output ---' -ForegroundColor Red
+      foreach ($line in @($composeOut)) { Write-Host ("  {0}" -f $line) -ForegroundColor DarkYellow }
+      Write-Host '--------------------------------' -ForegroundColor Red
+      throw (@(
+        'Docker compose up failed.',
+        '',
+        'Deleting containers is fine: Start will recreate them via docker-compose.yml.',
+        'If images were also removed, Docker must pull pgvector/pgvector:pg16 and redis:7-alpine.',
+        'Pull failure usually means Docker Hub is unreachable — configure a registry mirror in Docker Desktop,',
+        'or pull when the network works, then run Start again.'
+      ) -join [Environment]::NewLine)
     }
   } finally { Pop-Location }
 
   if (-not (Test-ContainerRunning $PostgresContainer) -or -not (Test-ContainerRunning $RedisContainer)) {
     throw 'Docker services failed to start. Check Docker Desktop.'
   }
+}
+
+function Wait-PostgresReady([int]$Seconds = 90) {
+  for ($index = 0; $index -lt $Seconds; $index += 2) {
+    if ((Invoke-Docker -DockerArgs @('exec', $PostgresContainer, 'pg_isready', '-U', 'postgres')) -eq 0) {
+      return $true
+    }
+    Start-Sleep -Seconds 2
+  }
+  return $false
+}
+
+function Get-PackagedDatabaseName {
+  $url = Read-PackagedEnvValue 'DATABASE_URL'
+  if ([string]::IsNullOrWhiteSpace($url)) { return 'customer_ai' }
+  # postgresql://user:pass@host:port/dbname?schema=public
+  if ($url -match '/([^/?]+)(\?|$)') { return $Matches[1] }
+  return 'customer_ai'
+}
+
+function Test-ApiBusinessTablesExist([string]$DatabaseName) {
+  $oldPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'SilentlyContinue'
+  try {
+    $result = & $DockerExe exec $PostgresContainer psql -U postgres -d $DatabaseName -tAc "SELECT to_regclass('public.shops')" 2>$null
+    return ([string]$result).Trim() -match 'shops'
+  } finally {
+    $ErrorActionPreference = $oldPreference
+  }
+}
+
+# Empty DB / new volume: apply Prisma migrations for API tables.
+# RAG tables are still created by rag-service via scripts/init-db.sql on startup.
+function Ensure-DatabaseSchema {
+  if (-not (Wait-PostgresReady 90)) {
+    throw 'PostgreSQL is not ready. Check Docker container customer-ai-postgres.'
+  }
+
+  $databaseName = Get-PackagedDatabaseName
+  if (Test-ApiBusinessTablesExist $databaseName) {
+    Write-Host 'Database: business tables already present.' -ForegroundColor DarkGray
+    return
+  }
+
+  $backendDir = Join-Path $Root 'app\backend'
+  $schemaPath = Join-Path $backendDir 'prisma\schema.prisma'
+  $prismaJs = Join-Path $backendDir 'node_modules\prisma\build\index.js'
+  $databaseUrl = Read-PackagedEnvValue 'DATABASE_URL'
+  if ([string]::IsNullOrWhiteSpace($databaseUrl)) {
+    $databaseUrl = 'postgresql://postgres:postgres@127.0.0.1:5433/customer_ai?schema=public'
+  }
+
+  if ((Test-Path -LiteralPath $prismaJs) -and (Test-Path -LiteralPath $schemaPath)) {
+    Write-Host 'Database: empty schema detected, running prisma migrate deploy...' -ForegroundColor Yellow
+    $prevUrl = $env:DATABASE_URL
+    $env:DATABASE_URL = $databaseUrl
+    Push-Location $backendDir
+    try {
+      $oldPreference = $ErrorActionPreference
+      $ErrorActionPreference = 'SilentlyContinue'
+      $migrateOut = & $NodeExe $prismaJs migrate deploy --schema $schemaPath 2>&1
+      $code = $LASTEXITCODE
+      $ErrorActionPreference = $oldPreference
+      if ($code -ne 0) {
+        Write-Host '--- prisma migrate deploy output ---' -ForegroundColor Red
+        foreach ($line in @($migrateOut)) { Write-Host ("  {0}" -f $line) -ForegroundColor DarkYellow }
+        throw 'Prisma migrate deploy failed. Check DATABASE_URL and PostgreSQL logs.'
+      }
+    } finally {
+      Pop-Location
+      if ($null -eq $prevUrl -or $prevUrl -eq '') {
+        Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue
+      } else {
+        $env:DATABASE_URL = $prevUrl
+      }
+    }
+  } else {
+    # Fallback when prisma CLI is absent: apply migration SQL in name order (empty DB only).
+    Write-Host 'Database: Prisma CLI missing, applying migration SQL via docker exec...' -ForegroundColor Yellow
+    $migrationsDir = Join-Path $backendDir 'prisma\migrations'
+    if (-not (Test-Path -LiteralPath $migrationsDir)) {
+      throw 'Database migrations folder missing: app\backend\prisma\migrations'
+    }
+    $dirs = Get-ChildItem -LiteralPath $migrationsDir -Directory | Sort-Object Name
+    foreach ($dir in $dirs) {
+      $sqlPath = Join-Path $dir.FullName 'migration.sql'
+      if (-not (Test-Path -LiteralPath $sqlPath)) { continue }
+      Write-Host ("Database: applying {0}..." -f $dir.Name) -ForegroundColor DarkGray
+      $oldPreference = $ErrorActionPreference
+      $ErrorActionPreference = 'SilentlyContinue'
+      Get-Content -LiteralPath $sqlPath -Raw -Encoding utf8 | & $DockerExe exec -i $PostgresContainer psql -U postgres -d $databaseName -v 'ON_ERROR_STOP=1' 2>&1 | Out-Null
+      $code = $LASTEXITCODE
+      $ErrorActionPreference = $oldPreference
+      if ($code -ne 0) {
+        throw ("Failed applying SQL migration: {0}" -f $dir.Name)
+      }
+    }
+  }
+
+  if (-not (Test-ApiBusinessTablesExist $databaseName)) {
+    throw 'Database schema still missing after migrate. Check data\logs and PostgreSQL.'
+  }
+  Write-Host 'Database: business tables ready.' -ForegroundColor Green
 }
 
 function Test-PortListening([int]$Port) {
@@ -338,7 +502,11 @@ if (-not (Test-Path -LiteralPath $NodeExe)) { throw 'Portable Node is missing. R
 
 Ensure-DockerReady
 
+Ensure-BundledDockerImages
+
 Ensure-DockerServices
+
+Ensure-DatabaseSchema
 
 Ensure-OpenClawGateway
 

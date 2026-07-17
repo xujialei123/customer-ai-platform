@@ -2,8 +2,8 @@
 /**
  * @file apps/api/src/services/safety.service.ts
  * @module API Service 与 Worker
- * @description 高风险词、禁止承诺和自动发送开关判定。
- * @see 联动关注：AGENTS.md 风控规则。
+ * @description 高风险词、非寒暄空召回转人工、禁止承诺和自动发送开关判定。
+ * @see 联动关注：AGENTS.md 风控规则、handoff。
  */
 
 /** 寒暄/礼貌短句：无知识召回也不必转人工，交给模型正常应答。 */
@@ -131,13 +131,12 @@ export class SafetyService {
                 riskLevel: 'low'
             };
         }
-        // 知识库未命中：仍交 AI 澄清/回答，并允许自动发送（高风险词已在上面拦截）。
-        // 业务默认「有召回更稳」；无召回时由模型按系统提示避免胡编承诺。
+        // 非寒暄空召回：无知识依据不得自动发送，进转人工（AGENTS：无明确答案须转人工确认）。
         if ((input.ragHitCount ?? 0) === 0) {
             return {
-                allowAutoSend: true,
-                riskLevel: 'low',
-                reason: '知识库未召回，由 AI 直接处理'
+                allowAutoSend: false,
+                riskLevel: 'high',
+                reason: '知识库未召回，需转人工确认'
             };
         }
         if (input.aiReply && this.forbiddenCommitments.some((kw) => input.aiReply.includes(kw))) {

@@ -13,6 +13,7 @@ import { conversationRoutes } from './routes/conversations.js';
 import { guideRoutes } from './routes/guide.js';
 import { handoffRoutes } from './routes/handoff.js';
 import { healthRoutes } from './routes/health.js';
+import { logsRoutes } from './routes/logs.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { orderRoutes } from './routes/orders.js';
 import { replyDraftRoutes } from './routes/reply-drafts.js';
@@ -29,6 +30,7 @@ const QUIET_REQUEST_PATHS = [
     '/rpa/outbound',
     '/handoff/list',
     '/handoff/count',
+    '/logs/recent',
     '/guide/status',
     '/health'
 ];
@@ -67,6 +69,7 @@ await app.register(formbody);
 await app.register(healthRoutes);
 await app.register(guideRoutes);
 await app.register(handoffRoutes);
+await app.register(logsRoutes);
 await app.register(rpaRoutes);
 await app.register(wecomWebhookRoutes);
 await app.register(knowledgeRoutes);

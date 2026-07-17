@@ -4,16 +4,24 @@
 # @see 联动关注：交付流程变化时同步。
 客服 AI Windows 一体化便携包
 
-外部依赖：Windows 10/11 64 位、Google Chrome、Docker Desktop。
+给别人用之前，请确认 BUILD-INFO.txt 里 DockerImagesBundled=true。
+为 true 时：对方一般不必再从 Docker Hub 拉镜像；启动会自动 load 包内镜像、建容器、空库建表。
 
-首次使用：
-1. 安装并启动 Docker Desktop。
-2. 双击 Start-Customer-AI.bat，浏览器会自动打开配置引导页 http://127.0.0.1:3001/guide 。
-3. 打开引导页配置大模型（Agnes 或自定义）与 Embedding，加载 Chrome 扩展并上传知识库。
-4. 打开 Chrome 扩展管理页 chrome://extensions，开启开发者模式。
-5. 选择“加载已解压的扩展程序”，选择 extensions\customer-ai-rpa。
-6. 在客服平台页面中人工登录一次，插件会通过本地 WebSocket 连接服务。
-7. 白名单客户试发消息，确认自动切换和自动发送正常后再正式使用。
+对方电脑需要提前装好（只需一次）：
+- Windows 10/11 64 位
+- Docker Desktop（保持 Running）
+- Google Chrome
+
+对方首次使用：
+1. 解压整个便携包到本地目录（路径尽量短、勿放同步盘）。
+2. 双击 Start-Customer-AI.bat。
+   自动完成：加载包内镜像（如有）→ 启动 Postgres/Redis → 空库建业务表 → 启动 RAG/API。
+3. 浏览器打开配置引导页 http://127.0.0.1:3001/guide
+   - 填写大模型与 Embedding Key（若打包时已写入则可跳过）
+   - 上传门店知识库（可用包内 samples\kb 样例，上传后点编译）
+4. Chrome 打开 chrome://extensions ，开启「开发者模式」
+   →「加载已解压的扩展程序」→ 选择本包 extensions\customer-ai-rpa
+5. 打开美团/抖音客服页并登录一次；插件连上本地服务后即可试聊。
 
 日常使用：
 - 启动：Start-Customer-AI.bat（自动打开配置引导页）
@@ -21,9 +29,17 @@
 - 检查：Doctor-Customer-AI.bat
 - 配置引导：http://127.0.0.1:3001/guide
 - 转人工工作台：http://127.0.0.1:3001/handoff
-- 打包后测试清单：portable-test-checklist.html（浏览器打开，可勾选进度）
+- RPA 排查日志：http://127.0.0.1:3001/logs
+- 打包后测试清单：portable-test-checklist.html
 - 插件状态：http://127.0.0.1:3001/rpa/extension/status
-- 项目流程：docs\project-flow.html
+
+打包方（你）交付前建议：
+1. pnpm package:windows:handoff
+   （强制把 Postgres/Redis 镜像打进 runtime\docker-images，包会更大）
+2. 或对已有目录执行：
+   powershell -File scripts\bundle-portable-docker-images.ps1 -PackageRoot <便携包路径>
+3. 自己先 Start 一遍，确认 BUILD-INFO 与引导页正常，再发给对方。
+4. 对外包请用 -SafeSendDefaults，不要把生产 Key/自动发送默认打开。
 
 安全规则：
 - 默认关闭真实自动发送，先在草稿模式验证。

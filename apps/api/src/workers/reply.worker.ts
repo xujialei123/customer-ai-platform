@@ -100,8 +100,7 @@ export function startReplyWorker() {
         // 当前消息会在 userContent 中单独传入，history 已在订单路由前读取并排除了当前消息。
         let reply = '这个我帮您转人工确认一下。';
         let raw = {};
-        // 命中高风险问题时不调用模型生成承诺类话术，直接转人工。
-        // 这样可以减少退款、投诉、赔偿等场景下模型越权回复的概率。
+        // 高风险（关键词 / 非寒暄空召回）不调用模型，直接用固定转人工话术。
         if (preRisk.riskLevel !== 'high') {
             try {
                 const openclawStarted = Date.now();
@@ -192,7 +191,7 @@ export function startReplyWorker() {
                         ragContext: ragContext
                     }
                 });
-                // 只有高风险才进转人工台；空召回已按 low 走 AI 自动发送，不再因 medium 卡住。
+                // 高风险（含非寒暄空召回）进转人工台；寒暄空召回仍为 low 可自动发送。
                 if (finalRisk.riskLevel === 'high') {
                     await prisma.conversation.update({
                         where: { id: conversation.id },
@@ -229,7 +228,7 @@ export function startReplyWorker() {
                     ragContext: ragContext
                 }
             });
-            // 高风险进入转人工工作台；空召回现为 low，由 AI 直接处理并可自动发送。
+            // 高风险（含非寒暄空召回）进入转人工工作台；Worker 已跳过 LLM，草稿为固定转人工话术。
             if (finalRisk.riskLevel === 'high') {
                 await prisma.conversation.update({
                     where: { id: conversation.id },

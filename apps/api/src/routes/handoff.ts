@@ -17,7 +17,7 @@ const runtimeRoot = process.env.CUSTOMER_AI_ROOT
     ? resolve(process.env.CUSTOMER_AI_ROOT)
     : resolve(currentDir, '../../../../');
 
-// 仅高风险进转人工台；空召回 medium 仍走 AI 澄清，避免正常咨询把台子刷满。
+// 高风险进转人工台（含：退款投诉等关键词、禁止承诺、非寒暄空召回）。
 const HANDOFF_RISK_LEVELS = ['high'];
 const OPEN_STATUSES = ['pending', 'approved', 'dispatching'];
 

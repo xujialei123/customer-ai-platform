@@ -312,7 +312,7 @@
               <div class="num">1</div>
               <div>
                 <h3>确认 Docker 已启动</h3>
-                <p>便携包需要 PostgreSQL 和 Redis。若 <code>Start-Customer-AI.bat</code> 能跑到本页，通常表示 Docker 已就绪。</p>
+                <p>需本机 Docker Desktop。交付包若含 <code>runtime\docker-images\*.tar</code>，启动会先本地 load，不必连 Docker Hub。空库会自动建业务表；RAG 表随服务初始化。能打开本页通常表示库与服务已就绪——接着配置 Key、上传知识库、加载扩展即可使用。</p>
               </div>
             </li>
             <li class="step">
@@ -365,6 +365,9 @@
         <div class="card-body links">
           <a class="link-btn" href="http://127.0.0.1:3001/handoff" target="_blank" rel="noreferrer">
             <span>转人工工作台</span><small id="handoffLinkHint">待处理高/中风险草稿</small>
+          </a>
+          <a class="link-btn" href="http://127.0.0.1:3001/logs" target="_blank" rel="noreferrer">
+            <span>RPA 排查日志</span><small>收消息 / 草稿 / 推送 / 发送</small>
           </a>
           <a class="link-btn" href="http://127.0.0.1:8787/kb-admin" target="_blank" rel="noreferrer">
             <span>知识库管理</span><small>上传门店资料</small>

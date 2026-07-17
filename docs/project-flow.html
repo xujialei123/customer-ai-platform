@@ -66,7 +66,7 @@
   <div class="layout">
     <nav>
       <strong>流程目录</strong>
-      <a href="#position">项目定位</a><a href="code-review-guide.html">代码梳理指南 ↗</a><a href="extension-rpa-flow.html">扩展 RPA 逻辑 ↗</a><a href="#services">启动与服务</a><a href="#knowledge">知识库流程</a>
+      <a href="#position">项目定位</a><a href="code-review-guide.html">代码梳理指南 ↗</a><a href="extension-rpa-flow.html">扩展 RPA 逻辑 ↗</a><a href="extension-rpa-logic.html">插件链路判断 ↗</a><a href="extension-rpa-files.html">扩展文件详解 ↗</a><a href="#services">启动与服务</a><a href="#knowledge">知识库流程</a>
       <a href="#message">消息回复流程</a><a href="#retrieval">Hybrid RAG</a><a href="#rpa">RPA 多会话</a>
       <a href="#context">上下文与去重</a><a href="#orders">订单查询</a><a href="#safety">风控规则</a>
       <a href="#storage">数据存储</a><a href="#files">文件职责索引</a><a href="#operation">操作顺序</a><a href="deployment-guide.html">部署手册 ↗</a><a href="#debug">排障顺序</a><a href="#limits">当前边界</a>
@@ -153,7 +153,7 @@
           <div class="card"><span class="tag red">强制转人工</span><ul class="risk-list"><li>退款、退券、退钱（含「想退款/申请退款」等明确表述）</li><li>投诉、差评</li><li>赔偿、破损、丢失</li><li>食品安全、吃坏、过敏</li><li>报警、12315、工商、律师</li><li>打官司、走法律、找律师</li><li>威胁、辱骂、情绪激烈</li></ul></div>
           <div class="card"><span class="tag red">禁止承诺</span><ul><li>保证退款或赔偿</li><li>免费赠送或特殊折扣</li><li>私下交易或绕开平台规则</li><li>未经查询承诺订单状态</li><li>资料不足时自行推测</li></ul></div>
         </div>
-        <div class="notice">高风险草稿会进入 <a href="http://127.0.0.1:3001/handoff">转人工工作台</a>并将会话标为 <code>needs_human</code>。知识库空召回时仍由 AI 生成回复，风险标为 low 并允许 RPA 自动发送（退款/投诉等高风险词除外）；模型侧需避免无依据承诺。LLM 提示会注入当前会话渠道（抖音来客 / 美团经营宝 / 企微），禁止再问「美团还是抖音买的」；出稿与插件回填前会清洗微信导流词与跨平台追问。默认只生成草稿时，会把 pending 草稿并入多轮上下文。RPA 同文软去重只挡「仍在处理/刚发出的回扫气泡」，不把后续相近咨询当成重复；发送冷却按平台独立。</div>
+        <div class="notice">高风险草稿会进入 <a href="http://127.0.0.1:3001/handoff">转人工工作台</a>并将会话标为 <code>needs_human</code>。业务排查可打开 <a href="http://127.0.0.1:3001/logs">RPA 排查日志</a>（收消息 / 检索 / 草稿 / 推送 / 发送，支持按平台与客户过滤）。知识库空召回：寒暄（你好/谢谢等）仍标 low 并允许自动发送；非寒暄空召回标 high、禁止自动发送，固定回复「这个我帮您转人工确认一下。」并进转人工工作台。LLM 提示会注入当前会话渠道（抖音来客 / 美团经营宝 / 企微），禁止再问「美团还是抖音买的」；出稿与插件回填前会清洗微信导流词与跨平台追问。默认只生成草稿时，会把 pending 草稿并入多轮上下文。RPA 同文软去重只挡「仍在处理/刚发出的回扫气泡」，不把后续相近咨询当成重复；发送冷却按平台独立。</div>
       </section>
 
       <section id="storage">
@@ -179,7 +179,7 @@
         <ol><li>执行 <code>pnpm dev</code> 并确认 Docker、LLM 配置（Agnes Key）、3001、3100、8787 正常；无需本机 OpenClaw。</li><li>打开 <code>http://127.0.0.1:8787/kb-admin</code> 上传并解析文件。</li><li>点击文件“编译”，审核 Wiki 和 Knowledge Cards。</li><li>按需设置卡片平台、门店、分类、关键词和优先级。</li><li>在 <code>chrome://extensions</code> 重新加载修改后的插件。</li><li>开启页面监听和自动处理未读；确认安全后再单独开启自动发送。</li></ol>
         <div class="grid two" style="margin-top:16px">
           <div class="card"><h3>开发启动</h3><p><code>pnpm dev</code> 会启动 API、RAG、Mock 页面，并按扩展模式等待 Chrome 插件连接。默认 <code>LLM_PROVIDER=agnes</code> 时跳过 OpenClaw。只有设置 <code>RPA_MOCK_MODE=playwright</code> 时才使用旧 Playwright watcher。</p></div>
-          <div class="card"><h3>Windows 便携交付</h3><p><code>pnpm package:windows</code> 会生成一体化目录包（含 <code>runtime\node-win-x64</code> 便携 Node，<strong>不再复制 OpenClaw</strong>）。客户双击 <code>Start-Customer-AI.bat</code> 启动 Docker、RAG 和 API，打开 <code>http://127.0.0.1:3001/guide</code> 配置 Agnes 或自定义 LLM / Embedding。</p></div>
+          <div class="card"><h3>Windows 便携交付</h3><p>交给别人用请打 <code>pnpm package:windows:handoff</code>（强制把 Postgres/Redis 镜像打进 <code>runtime\docker-images</code>）。对方装好 Docker Desktop + Chrome 后双击 <code>Start-Customer-AI.bat</code>：优先 <code>docker load</code> 包内镜像 → 起容器 → 空库自动建业务表；RAG 启动时跑 <code>init-db.sql</code>。再在 <code>/guide</code> 填 Key、上传知识库、加载扩展即可。未打镜像的包仍会尝试从仓库拉取。</p></div>
           <div class="card"><h3>完整部署手册</h3><p>开发、便携交付、生产基线、灰度上线、验收、回滚和备份步骤见 <a href="deployment-guide.html">部署与上线手册</a>。</p></div>
           <div class="card"><h3>首次客户配置</h3><p>客服电脑仍需安装 Docker Desktop 和 Chrome；打开 <code>/guide</code> 配置 LLM（Agnes 或自定义）与 Embedding，并在 <code>chrome://extensions</code> 加载 <code>extensions\customer-ai-rpa</code>。真实平台登录态由客户自己的 Chrome 保存。</p></div>
           <div class="card"><h3>交付安全边界</h3><p>对外交付宜使用 <code>-SafeSendDefaults</code> 并避免把本机密钥打进包；OpenClaw <code>data</code>、Cookie、聊天记录或日志不会复制。自动发送默认关闭，需客户确认后在插件中单独开启。</p></div>

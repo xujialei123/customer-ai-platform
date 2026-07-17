@@ -1,0 +1,547 @@
+<!--
+  @file docs/extension-rpa-files.html
+  @module 后台、文档、样例
+  @description Chrome 扩展 customer-ai-rpa 逐文件功能与代码位置索引（浏览器可直接打开）。
+  @see 联动关注：extensions/customer-ai-rpa/*、extension-rpa-flow.html。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chrome 扩展文件详解 · customer-ai-rpa</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#667085; --line:#dfe3e8; --soft:#f6f7f9; --blue:#175cd3; --blue-soft:#eff6ff; --green:#067647; --green-soft:#ecfdf3; --amber:#b54708; --amber-soft:#fffaeb; --red:#b42318; --red-soft:#fef3f2; --purple:#6941c6; --purple-soft:#f4ebff; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--ink); background: var(--soft); }
+    header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding: 10px 28px; border-bottom: 1px solid #28364b; background: #172033; color: #fff; }
+    header h1 { margin: 0; font-size: 18px; }
+    header p { margin: 4px 0 0; color: #bdc7d6; font-size: 12px; }
+    header a { color: #93c5fd; font-size: 12px; text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+    .links { display: flex; gap: 14px; flex-wrap: wrap; }
+    .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: calc(100vh - 64px); }
+    nav { position: sticky; top: 64px; align-self: start; height: calc(100vh - 64px); overflow: auto; padding: 20px 14px; border-right: 1px solid var(--line); background: #fff; }
+    nav strong { display: block; padding: 0 10px 10px; font-size: 12px; color: var(--muted); }
+    nav a { display: block; margin: 2px 0; border-radius: 5px; padding: 8px 10px; color: #344054; font-size: 13px; text-decoration: none; }
+    nav a:hover, nav a.active { background: #f2f4f7; color: var(--blue); }
+    nav .sub { padding-left: 18px; font-size: 12px; color: #475467; }
+    main { max-width: 1120px; margin: 0 auto; padding: 26px 30px 70px; }
+    section { margin-bottom: 40px; scroll-margin-top: 80px; }
+    h2 { margin: 0 0 10px; font-size: 20px; }
+    h3 { margin: 20px 0 8px; font-size: 15px; }
+    h4 { margin: 14px 0 6px; font-size: 13px; color: #344054; }
+    p, li { line-height: 1.7; font-size: 13px; color: #344054; }
+    .lead { color: var(--muted); max-width: 920px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 16px; }
+    .tag { display: inline-block; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 700; background: var(--blue-soft); color: var(--blue); }
+    .tag.green { background: var(--green-soft); color: var(--green); }
+    .tag.amber { background: var(--amber-soft); color: var(--amber); }
+    .tag.red { background: var(--red-soft); color: var(--red); }
+    .tag.purple { background: var(--purple-soft); color: var(--purple); }
+    .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; background: #fff; margin-bottom: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+    .grid.three { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    code, .path { border-radius: 4px; padding: 1px 5px; background: #eef1f5; font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+    .path { color: #0f3d8c; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; margin: 10px 0 16px; }
+    th, td { border-bottom: 1px solid #eaecf0; padding: 9px 11px; text-align: left; font-size: 12px; vertical-align: top; }
+    th { background: #f9fafb; color: #475467; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    td.fn { font-family: Consolas, monospace; color: #0f3d8c; white-space: nowrap; }
+    td.ln { font-family: Consolas, monospace; color: var(--muted); white-space: nowrap; width: 88px; }
+    pre.box { margin: 10px 0 0; border: 1px solid #d5d9e0; border-radius: 6px; padding: 14px; background: #111827; color: #e5e7eb; font-size: 12px; line-height: 1.65; overflow: auto; }
+    .notice { border-left: 4px solid var(--amber); padding: 12px 14px; background: var(--amber-soft); color: #7a2e0e; font-size: 13px; margin: 12px 0; }
+    .ok { border-left: 4px solid var(--green); padding: 12px 14px; background: var(--green-soft); color: #055f3a; font-size: 13px; margin: 12px 0; }
+    .flow { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin: 12px 0; }
+    .step { flex: 1 0 110px; border: 1px solid #cfd5dd; border-radius: 6px; padding: 10px; background: #fff; text-align: center; font-size: 12px; font-weight: 650; }
+    .step small { display: block; margin-top: 5px; color: var(--muted); font-weight: 400; font-size: 11px; }
+    .arrow { display: grid; place-items: center; flex: 0 0 14px; color: #98a2b3; font-weight: 800; }
+    .toc-file { font-weight: 650; }
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .grid, .grid.three { grid-template-columns: 1fr; }
+      main { padding: 20px 14px 40px; }
+      td.fn { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Chrome 扩展文件详解</h1>
+      <p>目录 <code style="background:#243247;color:#93c5fd;padding:1px 6px;border-radius:4px;">extensions/customer-ai-rpa</code> · 当前版本见 manifest · 行号以源码为准，改动后请对照函数名</p>
+    </div>
+    <div class="links">
+      <a href="extension-rpa-logic.html">实际链路与判断 →</a>
+      <a href="extension-rpa-flow.html">RPA 概念流 →</a>
+      <a href="project-flow.html">项目总览 →</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav>
+      <strong>目录</strong>
+      <a href="#overview">总览与加载关系</a>
+      <a href="#map">文件一览表</a>
+      <a class="toc-file" href="#manifest">manifest.json</a>
+      <a class="toc-file" href="#profiles">platform-profiles.js</a>
+      <a class="toc-file" href="#background">background.js</a>
+      <a class="sub" href="#bg-ws">WebSocket / 草稿路由</a>
+      <a class="sub" href="#bg-msg">onMessage 协议</a>
+      <a class="toc-file" href="#content">content.js</a>
+      <a class="sub" href="#ct-state">模块状态</a>
+      <a class="sub" href="#ct-dom">DOM / 会话读取</a>
+      <a class="sub" href="#ct-unread">未读与切会话</a>
+      <a class="sub" href="#ct-scan">主循环 scanMessages</a>
+      <a class="sub" href="#ct-draft">草稿回填发送</a>
+      <a class="toc-file" href="#main-click">douyin-main-click.js</a>
+      <a class="toc-file" href="#popup">popup.html / .js / .css</a>
+      <a class="toc-file" href="#readme">README.md</a>
+      <a href="#messages">消息类型一览</a>
+      <a href="#server">服务端联动</a>
+    </nav>
+
+    <main>
+      <section id="overview">
+        <h2>一、总览与加载关系</h2>
+        <p class="lead">扩展只做三件事：在已登录的美团/抖音页读 DOM、经本机 WebSocket 上报消息、收到草稿后回填或点发送。不登录平台、不读 Cookie/密码。大脑（RAG/LLM）都在本地 API。</p>
+
+        <div class="flow">
+          <div class="step">manifest.json<small>声明权限与脚本</small></div>
+          <div class="arrow">→</div>
+          <div class="step">background.js<small>Service Worker</small></div>
+          <div class="arrow">→</div>
+          <div class="step">platform-profiles<br/>+ content.js<small>注入页面/iframe</small></div>
+          <div class="arrow">→</div>
+          <div class="step">本地 Gateway<small>:3001/ws</small></div>
+          <div class="arrow">→</div>
+          <div class="step">draft → applyDraft<small>回填 / 发送</small></div>
+        </div>
+
+        <div class="grid three">
+          <div class="card">
+            <h3>隔离世界 Content</h3>
+            <p><code>platform-profiles.js</code> + <code>content.js</code> 在扩展隔离世界跑，读 DOM、点左侧会话、回填输入框。</p>
+          </div>
+          <div class="card">
+            <h3>MAIN world 辅助</h3>
+            <p>抖音 React 有时忽略隔离世界点击；<code>douyin-main-click.js</code> 由 background 注入页面主世界补点。</p>
+          </div>
+          <div class="card">
+            <h3>弹窗配置</h3>
+            <p><code>popup.*</code> 读写 <code>chrome.storage.local</code>：选择器、监听/自动切会话/自动发送开关。</p>
+          </div>
+        </div>
+
+        <div class="ok">打开方式：用浏览器直接打开本文件；或从 <a href="extension-rpa-flow.html">extension-rpa-flow.html</a> 跳转。行号针对当前仓库源码，大改后以函数名为准。</div>
+      </section>
+
+      <section id="map">
+        <h2>二、文件一览表</h2>
+        <table>
+          <thead>
+            <tr><th>文件</th><th>角色</th><th>何时加载</th><th>核心职责</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="path">manifest.json</span></td>
+              <td><span class="tag">清单</span></td>
+              <td>扩展安装/重载</td>
+              <td>MV3 权限、匹配域名、background / content / popup 入口</td>
+            </tr>
+            <tr>
+              <td><span class="path">platform-profiles.js</span></td>
+              <td><span class="tag green">配置</span></td>
+              <td>content 与 popup 共用</td>
+              <td>美团/抖音默认 DOM 选择器；URL 识别平台；合并 storage</td>
+            </tr>
+            <tr>
+              <td><span class="path">background.js</span></td>
+              <td><span class="tag purple">中枢</span></td>
+              <td>Service Worker 常驻</td>
+              <td>WebSocket、设置迁移、会话→tab/frame 路由、草稿下发、抖音 MAIN 点击</td>
+            </tr>
+            <tr>
+              <td><span class="path">content.js</span></td>
+              <td><span class="tag red">核心</span></td>
+              <td>匹配域名各 frame</td>
+              <td>扫未读、串行切会话、上报气泡、回填/发送、找回草稿</td>
+            </tr>
+            <tr>
+              <td><span class="path">douyin-main-click.js</span></td>
+              <td><span class="tag amber">辅助</span></td>
+              <td>按需 MAIN world</td>
+              <td>在页面主世界点击左侧未读卡片</td>
+            </tr>
+            <tr>
+              <td><span class="path">popup.html / popup.js / popup.css</span></td>
+              <td><span class="tag">UI</span></td>
+              <td>点扩展图标</td>
+              <td>开关与选择器编辑、AI 识别、重扫、连接状态</td>
+            </tr>
+            <tr>
+              <td><span class="path">README.md</span></td>
+              <td><span class="tag">文档</span></td>
+              <td>人工阅读</td>
+              <td>安装、Mock 测试、安全默认值说明</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ===================== manifest ===================== -->
+      <section id="manifest">
+        <h2>三、<code>manifest.json</code></h2>
+        <div class="meta">
+          <span class="tag">MV3</span>
+          <span class="tag green">入口声明</span>
+          <span class="tag amber">改版本号后需 chrome://extensions 重载</span>
+        </div>
+        <p>扩展身份证：权限、可注入域名、脚本入口。改 <code>host_permissions</code> / <code>content_scripts.matches</code> 后必须重载扩展。</p>
+        <table>
+          <thead><tr><th>字段 / 区域</th><th>作用</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">name / version / description</td><td>扩展显示名与版本（当前以文件内 <code>version</code> 为准，如 0.3.30）</td></tr>
+            <tr><td class="fn">permissions</td><td><code>storage</code> 存配置；<code>tabs</code>/<code>scripting</code>/<code>webNavigation</code> 注入与路由；<code>alarms</code> 断线重连</td></tr>
+            <tr><td class="fn">host_permissions</td><td>本机 API <code>127.0.0.1:3001</code>、Mock <code>:3100</code>、美团经营宝、抖音来客</td></tr>
+            <tr><td class="fn">background.service_worker</td><td>指向 <code>background.js</code></td></tr>
+            <tr><td class="fn">content_scripts</td><td>按顺序注入 <code>platform-profiles.js</code> → <code>content.js</code>；<code>all_frames: true</code> 覆盖 iframe</td></tr>
+            <tr><td class="fn">action.default_popup</td><td>指向 <code>popup.html</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ===================== profiles ===================== -->
+      <section id="profiles">
+        <h2>四、<code>platform-profiles.js</code></h2>
+        <div class="meta">
+          <span class="tag green">双平台默认选择器</span>
+          <span class="tag">无 DOM 操作</span>
+        </div>
+        <p>纯配置与合并逻辑，挂到 <code>globalThis.__customerAiPlatformProfiles</code>，供 content / popup / background 共用。</p>
+        <table>
+          <thead><tr><th>符号</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">PLATFORM_PROFILES.meituan</td><td class="ln">~8–23</td><td>美团默认：左侧会话、未读角标、左右气泡、contenteditable 输入框、发送按钮</td></tr>
+            <tr><td class="fn">PLATFORM_PROFILES.douyin</td><td class="ln">~24–39</td><td>抖音默认：contactCard、badge、chatd 左右气泡、textarea、sendBtn</td></tr>
+            <tr><td class="fn">detectPlatformFromUrl</td><td class="ln">~42</td><td>按 URL 判 <code>douyin</code> / <code>meituan</code>（含 Mock <code>:3100?platform=</code>）</td></tr>
+            <tr><td class="fn">mergePlatformSettings</td><td class="ln">~58</td><td>storage 全局开关 + <code>platformProfiles[平台]</code> + 默认值合并成运行时 settings</td></tr>
+          </tbody>
+        </table>
+        <div class="notice">弹窗保存的选择器写在 <code>platformProfiles.meituan|douyin</code>；全局开关 <code>enabled / autoSwitchConversations / autoSend / wsUrl</code> 在顶层。</div>
+      </section>
+
+      <!-- ===================== background ===================== -->
+      <section id="background">
+        <h2>五、<code>background.js</code>（Service Worker）</h2>
+        <div class="meta">
+          <span class="tag purple">中枢</span>
+          <span class="tag">WebSocket</span>
+          <span class="tag amber">草稿路由</span>
+        </div>
+        <p>不碰页面 DOM。负责连本地 API、记住「哪个 tab/frame 对应哪个会话」、把草稿送到正确 frame，并按需注入抖音 MAIN 点击脚本。</p>
+
+        <h3>5.1 状态与设置</h3>
+        <table>
+          <thead><tr><th>符号</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">GLOBAL_SETTINGS / DEFAULT_SETTINGS</td><td class="ln">~9–21</td><td>默认开关、wsUrl、settingsVersion、美团顶层兼容字段</td></tr>
+            <tr><td class="fn">sessionTargets / frameSessions</td><td class="ln">~25–26</td><td>会话键 → {tabId,frameId}；frame 当前 session 快照</td></tr>
+            <tr><td class="fn">migrateSettings</td><td class="ln">~110</td><td>旧版顶层选择器迁到 platformProfiles；强制刷新关键抖音选择器</td></tr>
+            <tr><td class="fn">getSettings / setState</td><td class="ln">~161–171</td><td>读 storage；写 connectionState 供弹窗显示</td></tr>
+          </tbody>
+        </table>
+
+        <h3 id="bg-ws">5.2 WebSocket 与草稿下发</h3>
+        <table>
+          <thead><tr><th>符号</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">connect</td><td class="ln">~174</td><td>连 <code>wsUrl</code>（默认 <code>ws://127.0.0.1:3001/rpa/extension/ws</code>）；open 时发 hello/settings</td></tr>
+            <tr><td class="fn">socket message → draft</td><td class="ln">~196</td><td><code>resolveDraftTarget</code> 找 tab/frame，<code>tabs.sendMessage({type:'applyDraft'})</code></td></tr>
+            <tr><td class="fn">抖音广播兜底</td><td class="ln">~206</td><td>精确路由失败时向所有抖音 tab 广播 applyDraft，防丢稿</td></tr>
+            <tr><td class="fn">normalizeDouyinSessionPart / sessionLookupKeys / resolveDraftTarget</td><td class="ln">~30–68</td><td>昵称去空白/emoji 后多键查找会话目标</td></tr>
+            <tr><td class="fn">registerSessionTarget</td><td class="ln">~70</td><td>content 上报 session 时登记路由表</td></tr>
+            <tr><td class="fn">reinjectPlatformTabs</td><td class="ln">~91</td><td>重连后给平台页重新注入脚本并 rescan</td></tr>
+          </tbody>
+        </table>
+
+        <h3 id="bg-msg">5.3 <code>chrome.runtime.onMessage</code> 协议</h3>
+        <table>
+          <thead><tr><th>type</th><th>约行</th><th>来源 → 去向</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">session</td><td class="ln">~261</td><td>content → 登记路由 + 转发 WS；可回写 detectedShopId</td></tr>
+            <tr><td class="fn">request_drafts</td><td class="ln">~288</td><td>content 找回 pending → 转发网关，不重跑 LLM</td></tr>
+            <tr><td class="fn">clearFrameSession</td><td class="ln">~293</td><td>历史咨询 Tab / 非白名单时清 frame 会话</td></tr>
+            <tr><td class="fn">inbound / outbound</td><td class="ln">~306–308</td><td>气泡上报 → WS → MessageService</td></tr>
+            <tr><td class="fn">diagnostics</td><td class="ln">~310</td><td>选择器命中数等 → /guide 状态</td></tr>
+            <tr><td class="fn">draft_send_result</td><td class="ln">~312</td><td>是否点发送成功 → 网关 mark-dispatched / 重推</td></tr>
+            <tr><td class="fn">settingsChanged</td><td class="ln">~314</td><td>弹窗改开关后同步服务端</td></tr>
+            <tr><td class="fn">getStatus / ensureConnection</td><td class="ln">~319 / 338</td><td>弹窗查连接；必要时立刻 connect</td></tr>
+            <tr><td class="fn">douyinMainClick</td><td class="ln">~321</td><td>注入并执行 <code>douyin-main-click.js</code>（MAIN world）</td></tr>
+          </tbody>
+        </table>
+
+        <h3>5.4 生命周期</h3>
+        <table>
+          <thead><tr><th>符号</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">onInstalled / onStartup</td><td class="ln">~345–355</td><td>补默认配置；建 <code>rpa-reconnect</code> 闹钟（约 30s）</td></tr>
+            <tr><td class="fn">alarms.onAlarm</td><td class="ln">~359</td><td>断线自动重连</td></tr>
+            <tr><td class="fn">injectAllFrames / webNavigation.onCompleted</td><td class="ln">~363–399</td><td>页面加载完注入 profiles+content；抖音额外准备 MAIN 脚本</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ===================== content ===================== -->
+      <section id="content">
+        <h2>六、<code>content.js</code>（页面大脑，约 2000 行）</h2>
+        <div class="meta">
+          <span class="tag red">最核心</span>
+          <span class="tag">串行锁 conversationTask</span>
+          <span class="tag amber">美团 + 抖音分支</span>
+        </div>
+        <p>注入经营宝 / 抖音来客（含 iframe）。主循环 <code>scanMessages</code>：诊断 → 调度未读 → 读气泡 → 上报；收到 <code>applyDraft</code> 后强制切到目标客户再回填/发送。</p>
+        <div class="notice">文件顶有 <code>if (!globalThis.__customerAiRpaInjected)</code> 防重复注入。热重载扩展后旧上下文会 <code>stopInvalidExtensionContext</code> 停掉观察器。</div>
+
+        <h3 id="ct-state">6.1 模块级状态（约 15–61 行）</h3>
+        <table>
+          <thead><tr><th>变量</th><th>约行</th><th>用途</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">seenMessages</td><td class="ln">16</td><td>本页已扫过的气泡稳定 id</td></tr>
+            <tr><td class="fn">submittedInboundIds / submittedInboundContents</td><td class="ln">18–24</td><td>已成功入队的 id /「会话+方向+正文」指纹，防切回话重复入库</td></tr>
+            <tr><td class="fn">lastDouyinInboundByConversation</td><td class="ln">29</td><td>抖音流式残文进化（「你」→「你好」）</td></tr>
+            <tr><td class="fn">initializedConversations</td><td class="ln">34</td><td>已初扫会话：历史只记 seen 不入队</td></tr>
+            <tr><td class="fn">conversationTask</td><td class="ln">52</td><td>串行锁：switching / waiting-draft / applying-draft</td></tr>
+            <tr><td class="fn">lastFocusedConversationKey / draftRecoverAtByConversation</td><td class="ln">59–61</td><td>切回话找回草稿 + 8s 节流</td></tr>
+          </tbody>
+        </table>
+
+        <h3>6.2 扩展上下文与消息桥（约 63–97）</h3>
+        <table>
+          <thead><tr><th>函数</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">stopInvalidExtensionContext</td><td class="ln">63</td><td>扩展重载后停 observer/定时器</td></tr>
+            <tr><td class="fn">isExtensionContextAlive</td><td class="ln">75</td><td>探测 runtime.id 是否还在</td></tr>
+            <tr><td class="fn">safeRuntimeMessage</td><td class="ln">83</td><td>向 background 发消息，失败则停上下文</td></tr>
+          </tbody>
+        </table>
+
+        <h3 id="ct-dom">6.3 DOM 深查与会话身份（约 99–450）</h3>
+        <table>
+          <thead><tr><th>函数</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">getSearchRoots / queryAllDeep / queryOneDeep</td><td class="ln">99–128</td><td>含 open shadowRoot 的查询</td></tr>
+            <tr><td class="fn">getAccessibleDocuments</td><td class="ln">132</td><td>同域可访问 iframe 文档列表</td></tr>
+            <tr><td class="fn">textOf / textOfDouyinBubble / stripDouyinTimePrefix</td><td class="ln">147–159</td><td>取气泡正文；抖音去时间前缀</td></tr>
+            <tr><td class="fn">isDouyinSystemNoticeContent</td><td class="ln">170</td><td>过滤「新用户进线」等系统提示，避免当客户提问</td></tr>
+            <tr><td class="fn">createStableId</td><td class="ln">186</td><td>美团优先 data-messageid；抖音用「会话:方向:出现序:正文」指纹</td></tr>
+            <tr><td class="fn">classifyDouyinInboundEvolution</td><td class="ln">206</td><td>流式残文 skip / 加长 replace</td></tr>
+            <tr><td class="fn">readDouyinSession / readMeituanSession / readSession</td><td class="ln">258–306</td><td>组装 Unified session（shopId/conversationId/customerName）</td></tr>
+            <tr><td class="fn">resolveSettings</td><td class="ln">285</td><td>background 取 storage → mergePlatformSettings</td></tr>
+            <tr><td class="fn">buildDomSnapshot / validateAiSelectors</td><td class="ln">329–359</td><td>弹窗「AI 自动识别」用的脱敏结构与校验</td></tr>
+            <tr><td class="fn">collectDiagnostics</td><td class="ln">391</td><td>未读数、选择器命中、开关状态 → /guide</td></tr>
+          </tbody>
+        </table>
+
+        <h3>6.4 会话匹配、未读角标、卡片 ID（约 454–630）</h3>
+        <table>
+          <thead><tr><th>函数</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">normalizeConversationKey / conversationIdsMatch</td><td class="ln">454–461</td><td>抖音昵称模糊匹配（去空白 emoji）</td></tr>
+            <tr><td class="fn">sessionsMatch / conversationMatchesTask</td><td class="ln">479–496</td><td>草稿会话 vs 当前页；任务锁是否对准当前客户</td></tr>
+            <tr><td class="fn">unreadSelectorsOf / douyinFallbackUnreadCount / unreadCountOf</td><td class="ln">519–555</td><td>读左侧角标；抖音兜底只信小角标，避免账号 ID 假数字</td></tr>
+            <tr>
+              <td class="fn">conversationIdOf</td><td class="ln">595</td>
+              <td>
+                从左侧卡片取会话标识：<strong>抖音</strong>优先 <code>[class*="uname-"]</code> 昵称；
+                <strong>美团</strong>优先 <code>data-user-id</code> 等属性。你选中的这段即此处。
+              </td>
+            </tr>
+            <tr><td class="fn">getDouyinCardUnreadCountForSession / getMeituanCard…</td><td class="ln">611–620</td><td>当前会话对应左侧卡的未读数（连发 N 条）</td></tr>
+          </tbody>
+        </table>
+
+        <pre class="box">// conversationIdOf（约 595–608 行）— 左侧卡片 → 会话键
+function conversationIdOf(item, settings) {
+  if (settings?.platform === 'douyin') {
+    return item.querySelector('[class*="uname-"]')?.textContent?.trim()
+      || item.getAttribute('data-conversation-id')
+      || …;
+  }
+  return item.getAttribute('data-conversation-id')
+    || item.getAttribute('data-customer-id')
+    || item.getAttribute('data-user-id')
+    || …;
+}</pre>
+
+        <h3 id="ct-unread">6.5 找回草稿、切会话调度（约 634–1420）</h3>
+        <table>
+          <thead><tr><th>函数</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">queryDouyinOutboundItems / countTrailingUnrepliedInbounds</td><td class="ln">634–655</td><td>统计「最后一条商家气泡之后」客户未回复条数</td></tr>
+            <tr><td class="fn">maybeRecoverDraftsOnRefocus</td><td class="ln">696</td><td>切回/仍待回复时 <code>request_drafts</code>；<strong>不抢其他客户的串行锁</strong>（0.3.29+）</td></tr>
+            <tr><td class="fn">conversationItemsOf</td><td class="ln">752</td><td>左侧卡片列表；历史咨询 Tab 返回空</td></tr>
+            <tr><td class="fn">isAllowedConversation</td><td class="ln">780</td><td>白名单为空放行；否则只处理配置客户</td></tr>
+            <tr><td class="fn">clearConversationTask / releaseConversationTaskAfterDraft</td><td class="ln">806 / 875</td><td>放锁；草稿完成后延迟再扫下一个未读</td></tr>
+            <tr><td class="fn">dispatchEditableInput</td><td class="ln">817</td><td>React 受控输入：native setter + beforeinput/input</td></tr>
+            <tr><td class="fn">attemptAutoSend / clickSendControl / trySubmitByEnter</td><td class="ln">884–1000</td><td>点发送或 Enter；抖音等按钮就绪</td></tr>
+            <tr><td class="fn">clickConversationItem / clickDouyinConversationItem</td><td class="ln">1017 / 1261</td><td>点左侧卡；抖音再请求 MAIN 辅助点击</td></tr>
+            <tr><td class="fn">isDouyinHistoryTabActive / isDouyinRpaAllowed</td><td class="ln">1077–1081</td><td>历史咨询禁止自动处理</td></tr>
+            <tr><td class="fn">isDouyinChatReady / isDouyinChatLoading / isDouyinChatClosed</td><td class="ln">1085–1168</td><td>聊天区未就绪时不读消息、不回填</td></tr>
+            <tr><td class="fn">shouldSwitchToUnread / scheduleDouyin… / scheduleMeituan…</td><td class="ln">1220–1311</td><td>是否需要离开当前页去点未读</td></tr>
+            <tr><td class="fn">beginConversationSwitch / switchToConversation</td><td class="ln">1268 / 1324</td><td>建串行任务并点击</td></tr>
+            <tr><td class="fn">findUnreadConversationItem</td><td class="ln">1351</td><td>第一个白名单未读；抖音跳过系统会话</td></tr>
+            <tr><td class="fn">scheduleUnreadConversation</td><td class="ln">1367</td><td>调度入口：applying/waiting 期间禁止抢切；空闲才 schedule*</td></tr>
+          </tbody>
+        </table>
+
+        <h3 id="ct-scan">6.6 主循环 <code>scanMessages</code>（约 1426–1640）</h3>
+        <div class="card">
+          <ol>
+            <li>遍历可访问 document → <code>resolveSettings</code></li>
+            <li>上报 <code>diagnostics</code></li>
+            <li><code>scheduleUnreadConversation</code>（自动切未读）</li>
+            <li><code>readSession</code>；白名单 / 系统会话 / chatReady 守卫</li>
+            <li><code>maybeRecoverDraftsOnRefocus</code>（找回 pending）</li>
+            <li>扫 inbound / outbound：初扫只记 seen；未读窗口末尾 N 条入队；抖音服务中客户可全量扫防连发丢句</li>
+            <li>系统提示只记 seen；同正文指纹去重；发 <code>inbound</code>/<code>outbound</code> 给 background</li>
+          </ol>
+        </div>
+
+        <h3 id="ct-draft">6.7 草稿回填 / 发送（约 1644–1955）</h3>
+        <table>
+          <thead><tr><th>函数</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">applyDraft</td><td class="ln">1644</td><td>ensure 会话 → 清洗微信/跨平台追问 → 回填 → 条件满足则 autoSend → 上报 draft_send_result</td></tr>
+            <tr><td class="fn">pageAlreadyHasOutboundContent</td><td class="ln">1848</td><td>本轮客户提问之后是否已有同文商家气泡（防切回话重发）</td></tr>
+            <tr><td class="fn">ensureConversationForDraft</td><td class="ln">1897</td><td>草稿所属客户强制切回话，phase=applying-draft</td></tr>
+          </tbody>
+        </table>
+
+        <h3>6.8 消息监听与启动（约 1957–末尾）</h3>
+        <table>
+          <thead><tr><th>入口</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">onMessage applyDraft / rescan / collectDomSnapshot / validateAiSelectors</td><td class="ln">1957</td><td>与 background / popup 协作</td></tr>
+            <tr><td class="fn">MutationObserver + setInterval(1500)</td><td class="ln">1974–1983</td><td>DOM 变化防抖 400ms 扫；定时兜底</td></tr>
+            <tr><td class="fn">bootstrapDiagnostics</td><td class="ln">1985</td><td>注入后立刻上报一次，方便 /guide 看状态</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ===================== main-click ===================== -->
+      <section id="main-click">
+        <h2>七、<code>douyin-main-click.js</code></h2>
+        <div class="meta">
+          <span class="tag amber">MAIN world</span>
+          <span class="tag">仅抖音</span>
+        </div>
+        <p>由 <code>background.js</code> 的 <code>douyinMainClick</code> 用 <code>chrome.scripting.executeScript({ world: 'MAIN' })</code> 注入。绕过部分 React 对隔离世界合成点击的忽略。</p>
+        <table>
+          <thead><tr><th>函数</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">normalizeName / parseBadgeCount / unreadCountInCard</td><td class="ln">12–46</td><td>昵称归一、角标读数</td></tr>
+            <tr><td class="fn">isSystemCard</td><td class="ln">48</td><td>跳过预警通知等系统卡</td></tr>
+            <tr><td class="fn">IIFE 主逻辑</td><td class="ln">~54+</td><td>确保在「当前咨询」；按 nameHint 或首个客户未读卡 <code>click()</code>；返回 ok/reason</td></tr>
+          </tbody>
+        </table>
+        <div class="notice">content 里 <code>clickDouyinConversationItem</code> 会先在隔离世界点一次，再 <code>safeRuntimeMessage({ type: 'douyinMainClick' })</code> 双保险。</div>
+      </section>
+
+      <!-- ===================== popup ===================== -->
+      <section id="popup">
+        <h2>八、弹窗 <code>popup.html</code> / <code>popup.js</code> / <code>popup.css</code></h2>
+        <div class="meta">
+          <span class="tag">配置 UI</span>
+          <span class="tag green">按平台存选择器</span>
+        </div>
+
+        <h3>8.1 popup.html 控件</h3>
+        <table>
+          <thead><tr><th>元素 id</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">status / platformHint</td><td>连接状态；当前页是美团还是抖音</td></tr>
+            <tr><td class="fn">shopId / *Selector</td><td>门店与 DOM 选择器（按当前平台写入 profile）</td></tr>
+            <tr><td class="fn">enabled</td><td>启用页面监听</td></tr>
+            <tr><td class="fn">autoSwitchConversations</td><td>自动处理未读会话（自动切会话）</td></tr>
+            <tr><td class="fn">autoSend</td><td>允许自动点击发送（默认关更安全）</td></tr>
+            <tr><td class="fn">auto-config / save / rescan</td><td>AI 识别选择器 / 保存 / 通知 content 重扫</td></tr>
+            <tr><td class="fn">ai-result</td><td>操作反馈文案</td></tr>
+          </tbody>
+        </table>
+
+        <h3>8.2 popup.js 逻辑</h3>
+        <table>
+          <thead><tr><th>函数 / 事件</th><th>约行</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td class="fn">resolveActivePlatform / loadProfileValues / load</td><td class="ln">14–35</td><td>读当前 tab URL → 填对应平台表单 + 连接状态</td></tr>
+            <tr><td class="fn">save click</td><td class="ln">80</td><td>写 storage（全局开关 + platformProfiles）→ settingsChanged</td></tr>
+            <tr><td class="fn">autoSend / autoSwitchConversations change</td><td class="ln">104–115</td><td>即时保存开关</td></tr>
+            <tr><td class="fn">rescan</td><td class="ln">120</td><td>向当前 tab 发 <code>rescan</code></td></tr>
+            <tr><td class="fn">auto-config</td><td class="ln">126</td><td>content 采脱敏 DOM → POST 本地 API 分析选择器 → validate → 填表</td></tr>
+          </tbody>
+        </table>
+        <p><code>popup.css</code> 仅负责窄弹窗排版（header/main/footer、toggle、按钮），无业务逻辑。</p>
+      </section>
+
+      <!-- ===================== readme ===================== -->
+      <section id="readme">
+        <h2>九、<code>README.md</code></h2>
+        <p>给人看的安装与测试说明：开发者模式加载本目录、Mock <code>:3100</code>、白名单、自动发送默认关闭、选择器需现场确认等。行为变更时应同步更新此文件与 <code>extension-rpa-flow.html</code>。</p>
+      </section>
+
+      <!-- ===================== messages ===================== -->
+      <section id="messages">
+        <h2>十、消息类型一览（扩展内部 + WebSocket）</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>content → background</h3>
+            <ul>
+              <li><code>session</code> — 当前聊天身份</li>
+              <li><code>inbound</code> / <code>outbound</code> — 客户/商家气泡</li>
+              <li><code>diagnostics</code> — 诊断</li>
+              <li><code>request_drafts</code> — 找回 pending</li>
+              <li><code>draft_send_result</code> — 发送结果</li>
+              <li><code>clearFrameSession</code> — 清空 frame</li>
+              <li><code>douyinMainClick</code> — 请求 MAIN 点击</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>background → content</h3>
+            <ul>
+              <li><code>applyDraft</code> — 下发回复草稿</li>
+              <li><code>rescan</code> — 强制再扫</li>
+              <li><code>collectDomSnapshot</code> — AI 识别快照</li>
+              <li><code>validateAiSelectors</code> — 校验候选选择器</li>
+            </ul>
+          </div>
+        </div>
+        <p>background ↔ 服务端协议由 <span class="path">apps/api/src/rpa/extension-gateway.ts</span> 定义（hello、settings、inbound、draft、request_drafts 等）。逻辑流见 <a href="extension-rpa-flow.html">extension-rpa-flow.html</a>。</p>
+      </section>
+
+      <!-- ===================== server ===================== -->
+      <section id="server">
+        <h2>十一、服务端联动（不在扩展目录内）</h2>
+        <table>
+          <thead><tr><th>路径</th><th>和插件的关系</th></tr></thead>
+          <tbody>
+            <tr><td><span class="path">apps/api/src/rpa/extension-gateway.ts</span></td><td>WebSocket 网关：expected 队列、推草稿、孤儿兜底、发送冷却</td></tr>
+            <tr><td><span class="path">apps/api/src/workers/reply.worker.ts</span></td><td>RAG + LLM 出草稿；带 platform 渠道提示</td></tr>
+            <tr><td><span class="path">apps/api/src/routes/guide.ts</span> + getting-started</td><td>状态页展示 diagnostics、白名单、LLM 配置</td></tr>
+            <tr><td><span class="path">apps/api/src/rpa/mock-chat-server.ts</span></td><td>无真实账号时用 <code>:3100</code> 模拟 DOM</td></tr>
+          </tbody>
+        </table>
+
+        <div class="ok">
+          <strong>排查捷径：</strong>自动切会话不灵 → 先看 content <code>scheduleUnreadConversation</code> / <code>maybeRecoverDraftsOnRefocus</code>；
+          草稿不推 → background <code>resolveDraftTarget</code> + gateway expected；
+          点了发送没发出 → <code>applyDraft</code> 清洗词 / 发送按钮选择器 / 平台拒收。
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

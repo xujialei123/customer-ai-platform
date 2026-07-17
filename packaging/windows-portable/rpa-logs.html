@@ -1,0 +1,316 @@
+<!--
+  @file packaging/windows-portable/rpa-logs.html
+  @module 数据库、共享包与交付
+  @description RPA 排查日志页：拉取 /logs/recent，按事件/平台/客户过滤。
+  @see 联动关注：apps/api/src/routes/logs.ts、terminal-log.ts。
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RPA 排查日志</title>
+  <style>
+    :root {
+      --ink: #101828; --muted: #667085; --line: #e4e7ec; --soft: #f8fafc;
+      --blue: #175cd3; --blue-soft: #eff4ff; --green: #067647; --green-soft: #ecfdf3;
+      --amber: #b54708; --amber-soft: #fffaeb; --red: #b42318; --red-soft: #fef3f2;
+      --purple: #6941c6; --purple-soft: #f4ebff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #eef4ff 0%, var(--soft) 160px);
+    }
+    header { max-width: 1100px; margin: 0 auto; padding: 24px 20px 8px; }
+    header h1 { margin: 0 0 6px; font-size: 26px; }
+    header p { margin: 0; color: var(--muted); line-height: 1.65; font-size: 13px; }
+    .toolbar {
+      max-width: 1100px; margin: 0 auto; padding: 12px 20px;
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    }
+    label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+    select, input[type="text"] {
+      min-width: 120px; border: 1px solid var(--line); border-radius: 8px;
+      padding: 8px 10px; font: inherit; font-size: 13px; background: #fff; color: var(--ink);
+    }
+    input[type="text"].wide { min-width: 180px; }
+    button {
+      border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px;
+      font: inherit; font-size: 13px; background: #fff; cursor: pointer;
+    }
+    button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    button:disabled { opacity: .55; cursor: default; }
+    .meta {
+      max-width: 1100px; margin: 0 auto; padding: 0 20px 8px;
+      display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted);
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      border-radius: 999px; padding: 3px 10px; background: #fff; border: 1px solid var(--line);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #98a2b3; }
+    .dot.ok { background: var(--green); }
+    .dot.warn { background: #f79009; }
+    main { max-width: 1100px; margin: 0 auto; padding: 8px 20px 40px; }
+    .empty {
+      border: 1px dashed var(--line); border-radius: 10px; padding: 28px;
+      text-align: center; color: var(--muted); background: #fff; font-size: 13px;
+    }
+    .row {
+      border: 1px solid var(--line); border-radius: 10px; background: #fff;
+      padding: 12px 14px; margin-bottom: 8px;
+    }
+    .row.head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .time { font-family: Consolas, monospace; font-size: 12px; color: var(--muted); }
+    .tag {
+      display: inline-block; border-radius: 999px; padding: 2px 8px;
+      font-size: 11px; font-weight: 700;
+    }
+    .tag.inbound, .tag.rag { background: var(--blue-soft); color: var(--blue); }
+    .tag.draft, .tag.push { background: var(--purple-soft); color: var(--purple); }
+    .tag.click_ok, .tag.outbound { background: var(--green-soft); color: var(--green); }
+    .tag.fill_only, .tag.warn { background: var(--amber-soft); color: var(--amber); }
+    .tag.click_fail, .tag.error { background: var(--red-soft); color: var(--red); }
+    .who { font-size: 13px; font-weight: 650; }
+    .why { font-size: 12px; color: var(--amber); }
+    .qa { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: #344054; }
+    .qa .k { color: var(--muted); font-size: 12px; margin-right: 4px; }
+    .links { max-width: 1100px; margin: 0 auto; padding: 0 20px 24px; font-size: 12px; }
+    .links a { color: var(--blue); margin-right: 14px; }
+    @media (max-width: 720px) {
+      select, input[type="text"], input[type="text"].wide { min-width: 100%; width: 100%; }
+      .toolbar { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RPA 排查日志</h1>
+    <p>看「收到消息 → 检索 → 草稿 → 推送插件 → 点发送/仅回填」整条链。默认每 2 秒刷新；进程重启后若内存为空，会尝试读便携包 <code>data/logs/api.out.log</code>。</p>
+  </header>
+
+  <div class="toolbar">
+    <label class="field">事件
+      <select id="event">
+        <option value="all">全部</option>
+        <option value="inbound">收到消息</option>
+        <option value="rag">知识库检索</option>
+        <option value="draft">AI 草稿</option>
+        <option value="push">推送插件</option>
+        <option value="click_ok">已点发送</option>
+        <option value="fill_only">仅回填</option>
+        <option value="click_fail">发送失败</option>
+        <option value="outbound">确认已发送</option>
+        <option value="warn">警告</option>
+        <option value="error">错误</option>
+      </select>
+    </label>
+    <label class="field">平台
+      <select id="platform">
+        <option value="all">全部</option>
+        <option value="douyin">抖音</option>
+        <option value="meituan">美团</option>
+        <option value="wecom">企微</option>
+      </select>
+    </label>
+    <label class="field">客户包含
+      <input id="customer" class="wide" type="text" placeholder="昵称或 ID 片段" />
+    </label>
+    <label class="field">关键词
+      <input id="q" class="wide" type="text" placeholder="问/答/原因…" />
+    </label>
+    <label class="field">条数
+      <select id="limit">
+        <option value="80">80</option>
+        <option value="120" selected>120</option>
+        <option value="200">200</option>
+        <option value="400">400</option>
+      </select>
+    </label>
+    <button type="button" class="primary" id="refreshBtn">刷新</button>
+    <button type="button" id="pauseBtn">暂停自动刷新</button>
+    <button type="button" id="clearViewBtn">清空视图</button>
+  </div>
+
+  <div class="meta">
+    <span class="pill"><span class="dot" id="liveDot"></span><span id="liveText">连接中…</span></span>
+    <span class="pill" id="sourcePill">来源：—</span>
+    <span class="pill" id="countPill">0 条</span>
+  </div>
+
+  <main id="list"><div class="empty">加载中…</div></main>
+
+  <div class="links">
+    <a href="/guide">引导配置</a>
+    <a href="/handoff">转人工工作台</a>
+    <a href="/rpa/extension/status" target="_blank" rel="noreferrer">插件状态 JSON</a>
+  </div>
+
+  <script>
+    let paused = false;
+    let latestId = 0;
+    let items = [];
+    let hideUntilId = 0;
+
+    const eventEl = document.getElementById('event');
+    const platformEl = document.getElementById('platform');
+    const customerEl = document.getElementById('customer');
+    const qEl = document.getElementById('q');
+    const limitEl = document.getElementById('limit');
+    const listEl = document.getElementById('list');
+    const liveDot = document.getElementById('liveDot');
+    const liveText = document.getElementById('liveText');
+    const sourcePill = document.getElementById('sourcePill');
+    const countPill = document.getElementById('countPill');
+    const pauseBtn = document.getElementById('pauseBtn');
+
+    function esc(text) {
+      return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function queryString(incremental) {
+      const params = new URLSearchParams();
+      params.set('limit', limitEl.value || '120');
+      params.set('event', eventEl.value || 'all');
+      params.set('platform', platformEl.value || 'all');
+      if (customerEl.value.trim())
+        params.set('customer', customerEl.value.trim());
+      if (qEl.value.trim())
+        params.set('q', qEl.value.trim());
+      if (incremental && latestId > 0)
+        params.set('afterId', String(latestId));
+      return params.toString();
+    }
+
+    function render() {
+      const view = items.filter((item) => item.id > hideUntilId);
+      countPill.textContent = view.length + ' 条';
+      if (!view.length) {
+        listEl.innerHTML = '<div class="empty">暂无日志。发一条测试消息，或确认 API 已启动且插件已连接。</div>';
+        return;
+      }
+      // 新的在上
+      const rows = [...view].reverse().map((item) => {
+        const bits = [];
+        bits.push('<div class="row">');
+        bits.push('<div class="row head">');
+        bits.push('<span class="time">' + esc(item.at || '') + '</span>');
+        bits.push('<span class="tag ' + esc(item.event) + '">' + esc(item.title || item.event) + '</span>');
+        if (item.platform)
+          bits.push('<span class="who">' + esc(item.platform) + '</span>');
+        if (item.customer)
+          bits.push('<span class="who">' + esc(item.customer) + '</span>');
+        if (item.riskLevel)
+          bits.push('<span class="tag ' + (item.riskLevel === 'low' ? 'click_ok' : 'warn') + '">风险 ' + esc(item.riskLevel) + '</span>');
+        if (item.allowAutoSend != null)
+          bits.push('<span class="tag ' + (item.allowAutoSend ? 'click_ok' : 'fill_only') + '">自动发=' + (item.allowAutoSend ? '是' : '否') + '</span>');
+        if (item.denyReason)
+          bits.push('<span class="why">原因：' + esc(item.denyReason) + '</span>');
+        if (item.method)
+          bits.push('<span class="time">方式=' + esc(item.method) + '</span>');
+        bits.push('</div>');
+        if (item.userMessage)
+          bits.push('<div class="qa"><span class="k">问</span>' + esc(item.userMessage) + '</div>');
+        if (item.content && item.event !== 'inbound')
+          bits.push('<div class="qa"><span class="k">答</span>' + esc(item.content) + '</div>');
+        if (item.content && item.event === 'inbound' && !item.userMessage)
+          bits.push('<div class="qa"><span class="k">问</span>' + esc(item.content) + '</div>');
+        if (Array.isArray(item.ragPreview) && item.ragPreview.length) {
+          item.ragPreview.forEach((line, i) => {
+            bits.push('<div class="qa"><span class="k">证' + (i + 1) + '</span>' + esc(line) + '</div>');
+          });
+        }
+        bits.push('</div>');
+        return bits.join('');
+      });
+      listEl.innerHTML = rows.join('');
+    }
+
+    function mergeItems(incoming, replace) {
+      if (replace) {
+        items = incoming.slice();
+      } else if (incoming.length) {
+        const seen = new Set(items.map((x) => x.id + ':' + x.at + ':' + x.summary));
+        for (const item of incoming) {
+          const key = item.id + ':' + item.at + ':' + item.summary;
+          if (!seen.has(key)) {
+            items.push(item);
+            seen.add(key);
+          }
+        }
+        if (items.length > 600)
+          items = items.slice(-600);
+      }
+      for (const item of items) {
+        if (Number(item.id) > latestId)
+          latestId = Number(item.id);
+      }
+      render();
+    }
+
+    async function refresh(incremental) {
+      try {
+        const res = await fetch('/logs/recent?' + queryString(Boolean(incremental)), { cache: 'no-store' });
+        if (!res.ok)
+          throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        liveDot.className = 'dot ok';
+        liveText.textContent = paused ? '已暂停' : '实时';
+        sourcePill.textContent = '来源：' + (data.source || '—')
+          + (data.totalInMemory != null ? ' · 内存 ' + data.totalInMemory : '')
+          + (data.path ? ' · 文件' : '');
+        // 文件源没有稳定递增 id，筛选变化时整表替换；内存增量用 afterId
+        const replace = !incremental || data.source === 'file' || !latestId;
+        mergeItems(Array.isArray(data.items) ? data.items : [], replace);
+      } catch (error) {
+        liveDot.className = 'dot warn';
+        liveText.textContent = '拉取失败';
+        if (!items.length) {
+          listEl.innerHTML = '<div class="empty">无法读取日志：' + esc(error instanceof Error ? error.message : String(error))
+            + '。请确认 API 已在 3001 启动。</div>';
+        }
+      }
+    }
+
+    function resetAndLoad() {
+      latestId = 0;
+      items = [];
+      void refresh(false);
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', () => resetAndLoad());
+    document.getElementById('clearViewBtn').addEventListener('click', () => {
+      hideUntilId = latestId;
+      render();
+    });
+    pauseBtn.addEventListener('click', () => {
+      paused = !paused;
+      pauseBtn.textContent = paused ? '继续自动刷新' : '暂停自动刷新';
+      liveText.textContent = paused ? '已暂停' : '实时';
+    });
+    ['event', 'platform', 'limit'].forEach((id) => {
+      document.getElementById(id).addEventListener('change', () => resetAndLoad());
+    });
+    let filterTimer = null;
+    ['customer', 'q'].forEach((id) => {
+      document.getElementById(id).addEventListener('input', () => {
+        clearTimeout(filterTimer);
+        filterTimer = setTimeout(() => resetAndLoad(), 350);
+      });
+    });
+
+    resetAndLoad();
+    setInterval(() => {
+      if (!paused)
+        void refresh(true);
+    }, 2000);
+  </script>
+</body>
+</html>

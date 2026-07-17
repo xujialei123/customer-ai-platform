@@ -12,7 +12,11 @@ param(
   [string]$NodeRuntimeSource = '',
   [string]$PnpmCommand = '',
   [switch]$CreateZip,
-  [switch]$SafeSendDefaults
+  [switch]$SafeSendDefaults,
+  # Skip embedding Postgres/Redis image tars (smaller package; recipients must pull).
+  [switch]$SkipDockerImages,
+  # Fail the build if docker save cannot produce both image tars (recommended for handoff).
+  [switch]$RequireDockerImages
 )
 
 $ErrorActionPreference = 'Stop'
@@ -184,10 +188,27 @@ if ($prismaClientDir) {
   }
 }
 
-Write-Host '3/6 Copying portable Node runtime (OpenClaw not packaged)...' -ForegroundColor Cyan
+# Start needs prisma migrate deploy; --prod deploy omits prisma CLI, so copy it explicitly.
+$prismaCliCandidates = [System.Collections.Generic.List[string]]::new()
+foreach ($candidate in @(
+  (Join-Path $Root 'node_modules\prisma'),
+  (Join-Path $Root 'apps\api\node_modules\prisma')
+)) {
+  if (Test-Path -LiteralPath (Join-Path $candidate 'build\index.js')) {
+    $prismaCliCandidates.Add($candidate) | Out-Null
+  }
+}
+if ($prismaCliCandidates.Count -gt 0) {
+  Copy-Tree $prismaCliCandidates[0] (Join-Path $PackageRoot 'app\backend\node_modules\prisma')
+  Write-Host 'Prisma CLI copied for portable migrate deploy.' -ForegroundColor DarkGray
+} else {
+  Write-Host 'WARN: prisma CLI not found; Start will fall back to SQL via docker exec.' -ForegroundColor Yellow
+}
+
+Write-Host '3/7 Copying portable Node runtime (OpenClaw not packaged)...' -ForegroundColor Cyan
 Copy-Tree $NodeRuntimeSource (Join-Path $PackageRoot 'runtime\node-win-x64')
 
-Write-Host '4/6 Copying config and launchers...' -ForegroundColor Cyan
+Write-Host '4/7 Copying config and launchers...' -ForegroundColor Cyan
 Copy-Item -LiteralPath (Join-Path $Root 'docker-compose.yml') -Destination $PackageRoot
 Copy-Item -LiteralPath (Join-Path $Root 'README.md') -Destination $PackageRoot
 Copy-Tree (Join-Path $Root 'config') (Join-Path $PackageRoot 'config')
@@ -200,7 +221,94 @@ Copy-Item -Path (Join-Path $Root 'packaging\windows-portable\*') -Destination $P
 New-Item -ItemType Directory -Path (Join-Path $PackageRoot 'data\logs'), (Join-Path $PackageRoot 'data\sessions') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $PackageRoot 'app\rag-service\uploads') -Force | Out-Null
 
-Write-Host '5/6 Generating secret-free config...' -ForegroundColor Cyan
+# Bundle DB/Redis images so recipients can start without Docker Hub (China/offline friendly).
+$dockerImagesBundled = $false
+$dockerImagesDir = Join-Path $PackageRoot 'runtime\docker-images'
+New-Item -ItemType Directory -Path $dockerImagesDir -Force | Out-Null
+$dockerImageReadme = @(
+  'Bundled Docker images for offline first-start.',
+  'Start-Customer-AI.ps1 loads these tars when local images are missing.',
+  'pgvector-pg16.tar  -> pgvector/pgvector:pg16',
+  'redis-7-alpine.tar -> redis:7-alpine'
+) -join "`r`n"
+[IO.File]::WriteAllText((Join-Path $dockerImagesDir 'README.txt'), $dockerImageReadme, $utf8NoBom)
+
+if ($SkipDockerImages) {
+  Write-Host '5/7 Skipping Docker image bundle (-SkipDockerImages).' -ForegroundColor Yellow
+} else {
+  Write-Host '5/7 Bundling Docker images (docker save)...' -ForegroundColor Cyan
+  $dockerCmd = Get-Command docker.exe -ErrorAction SilentlyContinue
+  if (-not $dockerCmd) {
+    $msg = 'Docker CLI not found; cannot bundle images. Recipients will need to pull from registry.'
+    if ($RequireDockerImages) { throw $msg }
+    Write-Host ("WARN: {0}" -f $msg) -ForegroundColor Yellow
+  } else {
+    $imageSpecs = @(
+      @{ Ref = 'pgvector/pgvector:pg16'; File = 'pgvector-pg16.tar' },
+      @{ Ref = 'redis:7-alpine'; File = 'redis-7-alpine.tar' }
+    )
+    # Official Hub often times out in CN; try public pull-through prefixes then retag.
+    $pullPrefixes = @(
+      '',
+      'docker.1ms.run/',
+      'docker.m.daocloud.io/'
+    )
+    $saved = 0
+    foreach ($spec in $imageSpecs) {
+      $tarPath = Join-Path $dockerImagesDir $spec.File
+      Write-Host ("  Ensuring image {0} ..." -f $spec.Ref) -ForegroundColor DarkGray
+      $oldDockerPref = $ErrorActionPreference
+      $ErrorActionPreference = 'SilentlyContinue'
+      & docker.exe image inspect $spec.Ref | Out-Null
+      $inspectCode = $LASTEXITCODE
+      $ErrorActionPreference = $oldDockerPref
+      if ($inspectCode -ne 0) {
+        $pulled = $false
+        foreach ($prefix in $pullPrefixes) {
+          $source = if ($prefix) { "$prefix$($spec.Ref)" } else { $spec.Ref }
+          Write-Host ("  Pulling {0} ..." -f $source) -ForegroundColor Yellow
+          $ErrorActionPreference = 'SilentlyContinue'
+          & docker.exe pull $source | Out-Null
+          $pullCode = $LASTEXITCODE
+          $ErrorActionPreference = $oldDockerPref
+          if ($pullCode -ne 0) { continue }
+          if ($source -ne $spec.Ref) {
+            & docker.exe tag $source $spec.Ref
+            if ($LASTEXITCODE -ne 0) { continue }
+          }
+          $pulled = $true
+          break
+        }
+        if (-not $pulled) {
+          $msg = "Failed to pull $($spec.Ref) (Hub + mirrors). Configure Docker registry-mirrors, then rebuild."
+          if ($RequireDockerImages) { throw $msg }
+          Write-Host ("WARN: {0}" -f $msg) -ForegroundColor Yellow
+          continue
+        }
+      }
+      if (Test-Path -LiteralPath $tarPath) { Remove-Item -LiteralPath $tarPath -Force }
+      Write-Host ("  Saving {0} -> {1}" -f $spec.Ref, $spec.File) -ForegroundColor DarkGray
+      & docker.exe save -o $tarPath $spec.Ref
+      if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tarPath)) {
+        $msg = "docker save failed for $($spec.Ref)"
+        if ($RequireDockerImages) { throw $msg }
+        Write-Host ("WARN: {0}" -f $msg) -ForegroundColor Yellow
+        continue
+      }
+      $saved += 1
+      Write-Host ("  OK {0} ({1:N0} MB)" -f $spec.File, ((Get-Item -LiteralPath $tarPath).Length / 1MB)) -ForegroundColor DarkGray
+    }
+    $dockerImagesBundled = ($saved -eq $imageSpecs.Count)
+    if ($RequireDockerImages -and -not $dockerImagesBundled) {
+      throw 'RequireDockerImages: not all image tars were saved. Fix Docker pull/save and rebuild.'
+    }
+    if ($dockerImagesBundled) {
+      Write-Host 'Docker images bundled for offline first-start.' -ForegroundColor Green
+    }
+  }
+}
+
+Write-Host '6/7 Generating secret-free config...' -ForegroundColor Cyan
 $envText = [IO.File]::ReadAllText((Join-Path $Root '.env.example'), [Text.Encoding]::UTF8)
 # 便携包不捆绑 OpenClaw，禁止把开发机的 openclaw provider 打进交付包。
 $packagedLlmProvider = if ($SafeSendDefaults) { 'agnes' } else { Resolve-PackagedEnvValue 'LLM_PROVIDER' 'agnes' }
@@ -255,7 +363,10 @@ $buildInfo = @(
   'Customer AI Windows Portable',
   "BuiltAt=$([DateTime]::Now.ToString('s'))",
   'OpenClawBundled=false',
+  "DockerImagesBundled=$dockerImagesBundled",
+  'DockerImagesPath=runtime\docker-images',
   'PortableNode=runtime\node-win-x64',
+  'AutoMigrateOnStart=true',
   'ProjectEnvIncluded=false',
   'RpaSessionIncluded=false',
   'RpaMode=chrome-extension-websocket',
@@ -263,7 +374,7 @@ $buildInfo = @(
 ) -join "`r`n"
 [IO.File]::WriteAllText((Join-Path $PackageRoot 'BUILD-INFO.txt'), $buildInfo, $utf8NoBom)
 
-Write-Host '6/6 Checking package integrity...' -ForegroundColor Cyan
+Write-Host '7/7 Checking package integrity...' -ForegroundColor Cyan
 $nodeInPackage = Join-Path $PackageRoot 'runtime\node-win-x64\node.exe'
 if (-not (Test-Path -LiteralPath $nodeInPackage)) {
   throw "Portable Node was not copied: $nodeInPackage"
